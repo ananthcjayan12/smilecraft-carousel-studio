@@ -85,12 +85,14 @@ export function starterSlides(topic = '') {
     ['എന്തുകൊണ്ട് ഇത് പ്രധാനമാണ്?', 'രോഗികൾക്ക് പ്രസക്തമായ വിവരങ്ങൾ ചുരുക്കി എഴുതൂ.', 'Close-up dental concept showing the impact of this topic.'],
     ['എങ്ങനെ ശ്രദ്ധിക്കാം?', 'ലളിതവും ശരിയുമായ പരിചരണ നിർദേശങ്ങൾ ഇവിടെ ചേർക്കൂ.', 'Friendly clean professional dental health concept.'],
     ['കൂടുതൽ അറിയണോ?', 'നിങ്ങൾക്ക് അനുയോജ്യമായ വിവരങ്ങൾക്കായി ഡെന്റൽ പരിശോധന ബുക്ക് ചെയ്യൂ.', 'Happy dental clinic patient smiling confidently.'],
-  ]).map((s, i) => ({ id: `slide-${i + 1}`, role: ROLES[i], heading: s[0], body: s[1], visualPrompt: s[2], approved: false, image: '', imageSource: 'illustration' }));
+  ]).map((s, i) => ({ id: `slide-${i + 1}`, role: ROLES[i], heading: s[0], body: s[1], visualPrompt: s[2], approved: false, artwork: '', artworkProvider: '', artworkGeneratedAt: '' }));
 }
 export function newProject(topic = '', key = '') {
-  return { id: '', topic, key, template: 'editorial', slides: starterSlides(topic), instagram: '', youtubeTitle: '', youtubeDescription: '', brand: { name: 'SmileCraft', tagline: 'DENTAL CLINIC', primary: '#073a42', accent: '#14ada9', logo: '' }, customTemplates: [], selectedReference: '', updatedAt: '', stage: 0 };
+  return { id: '', topic, key, template: 'editorial', slides: starterSlides(topic), instagram: '', youtubeTitle: '', youtubeDescription: '', brand: { name: 'SmileCraft Dental Clinic', phone: '', tagline: 'DENTAL CLINIC', primary: '#073a42', accent: '#14ada9', logo: '' }, generation: { writingProvider: 'codex', writingModel: 'gpt-5.6', provider: 'openai', model: 'gpt-image-2' }, customTemplates: [], selectedReference: '', updatedAt: '', stage: 0 };
 }
 export function captionFallback(p) {
   const t = p.topic || 'ദന്താരോഗ്യം';
-  return { instagram: `${t}\n\n${p.slides.slice(0, 4).map(s => s.heading + ' — ' + s.body).join('\n\n')}\n\n${p.slides[4].body}\n\n#SmileCraft #DentalClinic #OralHealth #MalayalamDentalTips`, youtubeTitle: `${t} | SmileCraft Dental Clinic`, youtubeDescription: `${t}\n\n${p.slides.map((s, i) => `${i + 1}. ${s.heading}: ${s.body}`).join('\n\n')}\n\n#DentalCare #Malayalam #SmileCraft` };
+  const clinic = p.brand?.name || 'Dental Clinic';
+  const contact = p.brand?.phone ? `\n${clinic} · ${p.brand.phone}` : `\n${clinic}`;
+  return { instagram: `${t}\n\n${p.slides.slice(0, 4).map(s => s.heading + ' — ' + s.body).join('\n\n')}\n\n${p.slides[4].body}${contact}\n\n#DentalClinic #OralHealth #MalayalamDentalTips`, youtubeTitle: `${t} | ${clinic}`, youtubeDescription: `${t}\n\n${p.slides.map((s, i) => `${i + 1}. ${s.heading}: ${s.body}`).join('\n\n')}${contact}\n\n#DentalCare #Malayalam` };
 }

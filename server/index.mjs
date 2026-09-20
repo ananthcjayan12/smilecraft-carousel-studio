@@ -5,7 +5,8 @@ import path from 'node:path';
 import crypto from 'node:crypto';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
-import { runCodex } from './codex.mjs';
+import { runTextProvider, textProviderStatus } from './text-providers.mjs';
+import { generateSlideImage, imageProviderStatus } from './image-providers.mjs';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const site = path.join(root, 'web');
@@ -22,14 +23,14 @@ function body(req, max = 18_000_000) { return new Promise((resolve, reject) => {
   req.on('end', () => { try { resolve(JSON.parse(data || '{}')); } catch { reject(Object.assign(new Error('Invalid JSON'), { status: 400 })); } });
   req.on('error', reject);
 }); }
-function checkImage(url) { return typeof url === 'string' && /^data:image\/(png|jpeg|webp);base64,[a-z0-9+/=]+$/i.test(url) && url.length < 10_000_000; }
-const imageModel = process.env.OPENAI_IMAGE_MODEL || 'gpt-image-1-mini';
 const codexCheck = spawnSync(process.env.CODEX_BIN || 'codex', ['--version'], { encoding: 'utf8', timeout: 4000 });
 const codexAvailable = codexCheck.status === 0;
+const antigravityCheck = spawnSync(process.env.AGY_BIN || 'agy', ['--version'], { encoding: 'utf8', timeout: 4000 });
+const antigravityAvailable = antigravityCheck.status === 0;
 const server = http.createServer(async (req, res) => {
   const u = new URL(req.url || '/', `http://${host}`);
   try {
-    if (u.pathname === '/api/status' && req.method === 'GET') return send(res, 200, { codexAvailable, imagesAvailable: Boolean(process.env.OPENAI_API_KEY), imageModel, localOnly: host === '127.0.0.1' || host === 'localhost' });
+    if (u.pathname === '/api/status' && req.method === 'GET') return send(res, 200, { codexAvailable, textProviders: textProviderStatus(codexAvailable, antigravityAvailable), imageProviders: imageProviderStatus(codexAvailable, antigravityAvailable), localOnly: host === '127.0.0.1' || host === 'localhost' });
     if (u.pathname === '/api/projects' && req.method === 'GET') {
       const items = [];
       for (const f of await readdir(storage)) if (f.endsWith('.json')) {
@@ -43,7 +44,7 @@ const server = http.createServer(async (req, res) => {
       catch (e) { if (e.code === 'ENOENT') return send(res, 404, { error: 'Project not found' }); throw e; }
     }
     if (u.pathname === '/api/projects' && req.method === 'POST') {
-      const p = await body(req);
+      const p = await body(req, 90_000_000);
       if (typeof p.topic !== 'string' || !Array.isArray(p.slides) || p.slides.length !== 5) return send(res, 400, { error: 'A topic and exactly five slides are required.' });
       if (p.id && !safeId(p.id)) return send(res, 400, { error: 'Invalid project ID.' });
       const id = p.id || crypto.randomUUID(); const updatedAt = new Date().toISOString();
@@ -58,24 +59,18 @@ const server = http.createServer(async (req, res) => {
     if (u.pathname === '/api/draft' && req.method === 'POST') {
       const data = await body(req, 70_000);
       if (!String(data.topic || '').trim()) return send(res, 400, { error: 'Enter a topic before generating copy.' });
-      return send(res, 200, { draft: await runCodex('draft', { topic: String(data.topic).slice(0, 450), notes: String(data.notes || '').slice(0, 2000), language: data.language === 'en' ? 'English' : 'Malayalam', clinic: 'SmileCraft Dental Clinic' }) });
+      const clinic = { name: String(data.clinic?.name || '').slice(0, 80), phone: String(data.clinic?.phone || '').slice(0, 40) };
+      return send(res, 200, { draft: await runTextProvider('draft', { topic: String(data.topic).slice(0, 450), notes: String(data.notes || '').slice(0, 2000), language: 'Malayalam-English mix', clinic, provider: String(data.provider || 'codex').slice(0, 30), model: String(data.model || '').slice(0, 100) }) });
     }
     if (u.pathname === '/api/revise' && req.method === 'POST') {
       const data = await body(req, 80_000);
       if (!data.slide?.heading || !String(data.correction || '').trim()) return send(res, 400, { error: 'A slide and correction are required.' });
-      return send(res, 200, { slide: await runCodex('revise', { topic: String(data.topic).slice(0, 450), slide: data.slide, correction: String(data.correction).slice(0, 1800), role: data.slide.role }) });
+      const clinic = { name: String(data.clinic?.name || '').slice(0, 80), phone: String(data.clinic?.phone || '').slice(0, 40) };
+      return send(res, 200, { slide: await runTextProvider('revise', { topic: String(data.topic).slice(0, 450), slide: data.slide, correction: String(data.correction).slice(0, 1800), role: data.slide.role, clinic, provider: String(data.provider || 'codex').slice(0, 30), model: String(data.model || '').slice(0, 100) }) });
     }
-    if (u.pathname === '/api/image' && req.method === 'POST') {
-      if (!process.env.OPENAI_API_KEY) return send(res, 409, { error: 'AI image rendering needs OPENAI_API_KEY in your local server environment. The illustrated and upload-based templates work without it.' });
-      const data = await body(req, 50_000);
-      if (!String(data.prompt || '').trim()) return send(res, 400, { error: 'Enter an image prompt.' });
-      const prompt = `Professional, premium editorial dental education illustration or photography for an Instagram carousel. No letters, words, logos, watermarks, charts, labels, numbers or typographic elements. Clean composition, deep teal and soft turquoise studio accents, ample negative space, warm natural light, realistic teeth and anatomically plausible dentistry where appropriate. SUBJECT: ${String(data.prompt).slice(0, 900)}`;
-      const ac = new AbortController(); const timer = setTimeout(() => ac.abort(), 100000);
-      try {
-        const r = await fetch('https://api.openai.com/v1/images/generations', { method: 'POST', signal: ac.signal, headers: { 'Authorization': `Bearer ${process.env.OPENAI_API_KEY}`, 'Content-Type': 'application/json' }, body: JSON.stringify({ model: imageModel, prompt, size: '1024x1024', n: 1, output_format: 'png' }) });
-        const json = await r.json(); if (!r.ok || !json.data?.[0]?.b64_json) throw new Error(json.error?.message || 'Image provider did not return an image.');
-        return send(res, 200, { image: `data:image/png;base64,${json.data[0].b64_json}` });
-      } finally { clearTimeout(timer); }
+    if (u.pathname === '/api/render-slide' && req.method === 'POST') {
+      const data = await body(req, 30_000_000);
+      return send(res, 200, { image: await generateSlideImage(data) });
     }
     if (req.method !== 'GET' && req.method !== 'HEAD') return send(res, 405, { error: 'Method not allowed.' });
     let file = path.resolve(site, `.${decodeURIComponent(u.pathname === '/' ? '/index.html' : u.pathname)}`);

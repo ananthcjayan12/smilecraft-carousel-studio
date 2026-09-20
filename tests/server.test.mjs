@@ -5,16 +5,40 @@ import { readFile } from 'node:fs/promises';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { buildCodexPrompt, parseJsonResponse } from '../server/codex.mjs';
+import { buildSlideImagePrompt } from '../server/image-providers.mjs';
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const port = 42000 + Math.floor(Math.random() * 10000);
 const origin = `http://127.0.0.1:${port}`;
 let server;
+test('Codex prompt preserves bilingual scripts and exact configurable clinic identity', () => {
+  const prompt = buildCodexPrompt('draft', { topic: 'Scaling myths', clinic: { name: 'Example Dental Care', phone: '+91 98765 43210' } });
+  assert.match(prompt, /English words.*English Latin script/);
+  assert.match(prompt, /Never spell or transliterate an English word in Malayalam script/);
+  assert.match(prompt, /Example Dental Care; phone: \+91 98765 43210/);
+  assert.match(prompt, /Do not translate, transliterate, alter, or invent either value/);
+  const withoutPhone = buildCodexPrompt('revise', { clinic: { name: 'Another Clinic', phone: '' } });
+  assert.match(withoutPhone, /No phone number was provided, so do not invent or display one/);
+});
+test('image prompt uses approved copy, clinic identity and brand colors exactly', () => {
+  const prompt = buildSlideImagePrompt({ slideNumber: 2, slide: { role: 'Science', heading: 'Scaling എന്താണ്?', body: 'Plaque and tartar നീക്കം ചെയ്യുന്നു.', visualPrompt: 'clean dental visual' }, brand: { name: 'Example Dental', phone: '+91 12345 67890', tagline: 'CARE', primary: '#112233', accent: '#abcdef' } });
+  assert.match(prompt, /HEADING: "Scaling എന്താണ്\?"/);
+  assert.match(prompt, /PHONE: "\+91 12345 67890"/);
+  assert.match(prompt, /primary "#112233", accent "#abcdef"/);
+  assert.match(prompt, /Do not translate, transliterate, rewrite/);
+});
+test('provider response parser handles Antigravity envelopes and explanatory text', () => {
+  const draft = { slides: Array.from({ length: 5 }, () => ({ heading: 'H', body: 'B', visualPrompt: 'V' })), instagram: 'I', youtubeTitle: 'Y', youtubeDescription: 'D' };
+  assert.deepEqual(parseJsonResponse(JSON.stringify({ status: 'SUCCESS', response: 'extra text', structured_output: draft }), 'Antigravity CLI'), draft);
+  assert.deepEqual(parseJsonResponse(`Finished successfully.\n${JSON.stringify({ heading: 'H', body: 'B', visualPrompt: 'V' })}\nDone.`, 'Claude API'), { heading: 'H', body: 'B', visualPrompt: 'V' });
+  assert.throws(() => parseJsonResponse('not json', 'Claude API'), /Claude API did not return valid structured content/);
+});
 async function start() { server = spawn(process.execPath, ['server/index.mjs'], { cwd: root, env: { ...process.env, PORT: String(port), HOST: '127.0.0.1', OPENAI_API_KEY: '' }, stdio: ['ignore', 'pipe', 'pipe'] }); await new Promise((resolve, reject) => { const timer = setTimeout(() => reject(new Error('Server failed to start')), 9000); server.once('error', reject); server.stdout.on('data', data => { if (String(data).includes('Carousel Studio:')) { clearTimeout(timer); resolve(); } }); }); }
 async function json(url, method = 'GET', body = undefined) { const r = await fetch(`${origin}${url}`, { method, headers: { 'Content-Type': 'application/json' }, body: body === undefined ? undefined : JSON.stringify(body) }); return { status: r.status, data: await r.json() }; }
 test('local server, project storage, input validation and unavailable AI gateway', async t => {
   await start(); t.after(() => server?.kill());
   const page = await fetch(origin); assert.equal(page.status, 200); assert.match(await page.text(), /SmileCraft Studio/);
-  const status = await json('/api/status'); assert.equal(status.status, 200); assert.equal(typeof status.data.codexAvailable, 'boolean'); assert.equal(status.data.imagesAvailable, false);
+  const status = await json('/api/status'); assert.equal(status.status, 200); assert.equal(typeof status.data.codexAvailable, 'boolean'); assert.equal(status.data.imageProviders.openai.available, false); assert.equal(typeof status.data.imageProviders.antigravity.available, 'boolean');
   const invalid = await json('/api/projects', 'POST', { topic: 'demo', slides: [] }); assert.equal(invalid.status, 400);
   const slides = Array.from({ length: 5 }, (_, i) => ({ id: `slide-${i+1}`, heading: 'Test', body: 'Content', approved: i === 0 }));
   const project = { topic: 'Dental demo test', slides, template: 'editorial', brand: { name: 'SmileCraft' } };
@@ -22,7 +46,7 @@ test('local server, project storage, input validation and unavailable AI gateway
   t.after(() => fs.promises.rm(path.join(root, 'storage', 'projects', `${saved.data.id}.json`), { force: true }));
   const loaded = await json(`/api/projects/${saved.data.id}`); assert.equal(loaded.data.project.slides.length, 5);
   const listed = await json('/api/projects'); assert.ok(listed.data.projects.some(p => p.id === saved.data.id));
-  const img = await json('/api/image', 'POST', { prompt: 'white tooth' }); assert.equal(img.status, 409); assert.match(img.data.error, /OPENAI_API_KEY/);
+  const img = await json('/api/render-slide', 'POST', { provider: 'openai', slideNumber: 1, slide: { approved: true, role: 'Hook', heading: 'Test', body: 'Content' }, brand: { name: 'Clinic' }, referenceImage: 'data:image/png;base64,aA==' }); assert.equal(img.status, 409); assert.match(img.data.error, /OPENAI_API_KEY/);
   if (!status.data.codexAvailable) { const draft = await json('/api/draft', 'POST', { topic: 'tooth sensitivity' }); assert.equal(draft.status, 500); assert.match(draft.data.error, /Codex CLI/); }
   const del = await json(`/api/projects/${saved.data.id}`, 'DELETE'); assert.equal(del.status, 200);
   const missing = await json(`/api/projects/${saved.data.id}`); assert.equal(missing.status, 404);
