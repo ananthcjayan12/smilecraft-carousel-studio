@@ -7,14 +7,17 @@ import { fileURLToPath } from 'node:url';
 import { availableAgyModels, runTextProvider, textProviderStatus } from './text-providers.mjs';
 import { generateSlideImage, imageProviderStatus } from './image-providers.mjs';
 import { inspectCli } from './cli-tools.mjs';
+import { providerConcurrency, withProviderSlot } from './provider-concurrency.mjs';
+import { MASTER_TEMPLATE_IDS } from '../web/design-systems.js';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const site = path.join(root, 'web');
 const storage = path.join(root, 'storage', 'projects');
+const templateStorage = path.join(site, 'assets', 'design-systems');
 const port = Number(process.env.PORT) || 4178;
 const host = process.env.HOST || '127.0.0.1';
 await mkdir(storage, { recursive: true });
-const mime = { '.html': 'text/html; charset=utf-8', '.css': 'text/css; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.json': 'application/json; charset=utf-8', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.png': 'image/png', '.svg': 'image/svg+xml', '.ico': 'image/x-icon' };
+const mime = { '.html': 'text/html; charset=utf-8', '.css': 'text/css; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.json': 'application/json; charset=utf-8', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.png': 'image/png', '.svg': 'image/svg+xml', '.ico': 'image/x-icon', '.webp': 'image/webp' };
 const safeId = id => /^[\w-]{6,64}$/.test(id ?? '');
 function send(res, code, data) { res.writeHead(code, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff' }); res.end(JSON.stringify(data)); }
 function body(req, max = 18_000_000) { return new Promise((resolve, reject) => {
@@ -40,7 +43,29 @@ const server = http.createServer(async (req, res) => {
       Object.assign(imageProviders.codex, { installed: codexAvailable, authenticated: codexAuthenticated, path: codexCli.binary, version: codexCli.version, error: codexCli.error });
       Object.assign(textProviders.antigravity, { path: antigravityCli.binary, version: antigravityCli.version, error: antigravityCli.error });
       Object.assign(imageProviders.antigravity, { path: antigravityCli.binary, version: antigravityCli.version, error: antigravityCli.error });
-      return send(res, 200, { codexAvailable, codexAuthenticated, cli: { codex: codexCli, antigravity: antigravityCli }, textProviders, imageProviders, localOnly: host === '127.0.0.1' || host === 'localhost' });
+      return send(res, 200, { codexAvailable, codexAuthenticated, cli: { codex: codexCli, antigravity: antigravityCli }, textProviders, imageProviders, providerConcurrency, localOnly: host === '127.0.0.1' || host === 'localhost' });
+    }
+    if (u.pathname === '/api/template-pack' && req.method === 'GET') {
+      const installed = [];
+      for (const id of MASTER_TEMPLATE_IDS) {
+        if (fs.existsSync(path.join(templateStorage, id + '.png'))) installed.push(id);
+      }
+      return send(res, 200, { installed, logoInstalled: fs.existsSync(path.join(templateStorage, 'clinic-logo.jpg')) });
+    }
+    if (u.pathname === '/api/template-pack' && req.method === 'POST') {
+      const data = await body(req, 11_000_000);
+      const id = String(data.id || '');
+      const isLogo = id === 'clinic-logo';
+      if (!isLogo && !MASTER_TEMPLATE_IDS.has(id)) return send(res, 400, { error: 'Unknown template pack image.' });
+      const match = /^data:image\/(png|jpeg);base64,([A-Za-z0-9+/=]+)$/.exec(String(data.image || ''));
+      if (!match || (isLogo ? match[1] !== 'jpeg' : match[1] !== 'png')) return send(res, 400, { error: 'Expected a PNG design board or JPEG clinic logo.' });
+      const bytes = Buffer.from(match[2], 'base64');
+      const valid = isLogo ? bytes[0] === 0xff && bytes[1] === 0xd8 : bytes.subarray(0, 8).equals(Buffer.from('89504e470d0a1a0a', 'hex'));
+      if (!valid || bytes.length < 10_000 || bytes.length > 8_000_000) return send(res, 400, { error: 'Template image is invalid or too large.' });
+      await mkdir(templateStorage, { recursive: true });
+      const filename = isLogo ? 'clinic-logo.jpg' : id + '.png';
+      await writeFile(path.join(templateStorage, filename), bytes);
+      return send(res, 200, { ok: true, id });
     }
     if (u.pathname === '/api/models/agy' && req.method === 'GET') {
       if (!antigravityAvailable) return send(res, 409, { error: 'Antigravity CLI (agy) is not installed or is not on PATH.' });
@@ -85,7 +110,7 @@ const server = http.createServer(async (req, res) => {
     }
     if (u.pathname === '/api/render-slide' && req.method === 'POST') {
       const data = await body(req, 30_000_000);
-      return send(res, 200, { image: await generateSlideImage({ ...data, workDir: path.join(root, 'storage') }) });
+      return send(res, 200, { image: await withProviderSlot(data.provider, () => generateSlideImage({ ...data, workDir: path.join(root, 'storage') })) });
     }
     if (req.method !== 'GET' && req.method !== 'HEAD') return send(res, 405, { error: 'Method not allowed.' });
     let file = path.resolve(site, `.${decodeURIComponent(u.pathname === '/' ? '/index.html' : u.pathname)}`);
