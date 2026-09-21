@@ -15,10 +15,10 @@ function configured(stage, provider, fallback) {
   return count;
 }
 export const providerConcurrency = Object.freeze(Object.fromEntries(
-  IMAGE_PROVIDERS.map(provider => [provider, configured('image', provider, ['codex', 'antigravity'].includes(provider) ? 2 : MAX_SLIDES)])
+  IMAGE_PROVIDERS.map(provider => [provider, configured('image', provider, MAX_SLIDES)])
 ));
 export const textConcurrency = Object.freeze(Object.fromEntries(
-  TEXT_PROVIDERS.map(provider => [provider, configured('text', provider, ['codex', 'antigravity'].includes(provider) ? 2 : MAX_SLIDES)])
+  TEXT_PROVIDERS.map(provider => [provider, configured('text', provider, MAX_SLIDES)])
 ));
 const active = new Map(), waiting = new Map(), peak = new Map();
 const keysFor = stage => stage === 'text' ? textConcurrency : stage === 'image' ? providerConcurrency : null;
