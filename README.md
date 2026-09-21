@@ -31,6 +31,24 @@ For copy generation and rewrites, choose **Codex CLI, OpenAI API, Gemini API, An
 
 **Important:** A ChatGPT/Codex login is not the same as an OpenAI API key. The app does not claim that using the CLI makes separately billed image generation free.
 
+## Ten AI-generated master design systems
+
+Each master is one high-resolution AI-generated five-slide board, not a Canvas or CSS recreation. Choose one in Design and it will guide all five pages. Generation receives both the full board and an enlarged crop of the corresponding slide. Slides 1–4 remain informational with logo only; slide 5 alone has an appointment call-to-action, phone and location.
+
+All ten original high-resolution design boards and the clinic logo are checked into `web/assets/design-systems/`. They are available automatically in Design after updating this branch; they do not need to be uploaded or installed again for new projects. Clinic Settings → Master Template Library also supports re-importing an updated pack if you later replace the artwork.
+
+Clinic branding defaults to Dr. Pooja's Smile Craft Dental Clinic, phone 7907006842 and Sreenarayanapuram, Ezhupunna. The checked-in clinic logo is available as an image reference; you can also upload a different clinic logo in Clinic Settings. Settings remain editable.
+
+### Parallel image runners
+
+**Image stage (four providers):** Generate missing slides launches up to five independent requests simultaneously for OpenAI API, Gemini API, Codex CLI or Antigravity CLI. The UI shows how many jobs have started, are running, completed, and the actual peak concurrency. The server exposes live per-provider running/queued counts at `/api/generation-activity` and enforces its shared queue across overlapping projects. All four image providers default to five concurrent jobs, with optional `IMAGE_PARALLEL_OPENAI`, `IMAGE_PARALLEL_GEMINI`, `IMAGE_PARALLEL_CODEX`, and `IMAGE_PARALLEL_ANTIGRAVITY` process-environment overrides (integers 1–5).
+
+**Writing stage (five providers):** Codex CLI, OpenAI API, Gemini API, Antigravity CLI, and Claude API have independent `TEXT_PARALLEL_*` limits (default five, configurable 1–5). The initial draft is intentionally **one provider request containing all five coherent slide drafts and captions**, not five sequential calls. Individual rewrite requests can execute simultaneously across projects, subject to the shared writing queue. Running, queued, and configured capacities for both stages are visible at `/api/generation-activity`; advertised limits are also returned by `/api/status`.
+
+**Important:** Five is the maximum number of slide jobs in this application, not a provider-issued concurrency allowance. API account rate limits, usage tiers, and local CLI machine resources vary; lower the relevant environment cap if a provider throttles, returns errors, or the workstation runs out of memory. API image responses with 429 or 503 are retried with backoff. Running multiple paid image requests together can spend quota faster. Changes to environment limits require restarting the server.
+
+Always verify the final Malayalam-English text, exact clinic logo, clinical information and phone/location; image generation does not guarantee pixel-identical layouts or perfectly spelled text.
+
 ## Final artwork providers
 
 The app includes template-reference images and accepts custom PNG/JPEG/WebP references. For every slide it sends the approved heading/body, visual direction, selected reference, exact clinic details, brand colors, and optional logo to one of these providers:
