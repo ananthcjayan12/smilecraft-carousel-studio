@@ -9,6 +9,8 @@ import { buildCodexPrompt, parseJsonResponse } from '../server/codex.mjs';
 import { buildSlideImagePrompt, parseAgyImageEnvelope } from '../server/image-providers.mjs';
 import { parseAgyModels } from '../server/text-providers.mjs';
 import { resolveCliBinary } from '../server/cli-tools.mjs';
+import { providerConcurrency, withProviderSlot } from '../server/provider-concurrency.mjs';
+import { DESIGN_SYSTEMS, readTemplatePackZip } from '../web/design-systems.js';
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const port = 42000 + Math.floor(Math.random() * 10000);
 const origin = `http://127.0.0.1:${port}`;
@@ -25,7 +27,13 @@ test('Codex prompt preserves bilingual scripts and exact configurable clinic ide
 test('image prompt uses approved copy, clinic identity and brand colors exactly', () => {
   const prompt = buildSlideImagePrompt({ slideNumber: 2, slide: { role: 'Science', heading: 'Scaling എന്താണ്?', body: 'Plaque and tartar നീക്കം ചെയ്യുന്നു.', visualPrompt: 'clean dental visual' }, brand: { name: 'Example Dental', phone: '+91 12345 67890', tagline: 'CARE', primary: '#112233', accent: '#abcdef' } });
   assert.match(prompt, /HEADING: "Scaling എന്താണ്\?"/);
-  assert.match(prompt, /PHONE: "\+91 12345 67890"/);
+  assert.match(prompt, /PHONE \(CTA SLIDE ONLY\): ""/);
+  assert.match(prompt, /This is an INFORMATIONAL slide, NOT AN AD/);
+  assert.doesNotMatch(prompt, /7907006842/);
+  const final = buildSlideImagePrompt({ slideNumber: 5, slide: { role: 'CTA', heading: 'Smile healthier', body: 'Book your visit', visualPrompt: 'clinic' }, brand: { name: 'Example Dental', phone: '7907006842', location: 'Sreenarayanapuram, Ezhupunna' }, masterReferenceImage: 'data:image/png;base64,aA==' });
+  assert.match(final, /PHONE \(CTA SLIDE ONLY\): "7907006842"/);
+  assert.match(final, /LOCATION \(CTA SLIDE ONLY\): "Sreenarayanapuram, Ezhupunna"/);
+  assert.match(final, /IMAGE 1 is the ENLARGED REFERENCE FOR THIS EXACT SLIDE POSITION/);
   assert.match(prompt, /primary "#112233", accent "#abcdef"/);
   assert.match(prompt, /Do not translate, transliterate, rewrite/);
 });
@@ -63,8 +71,35 @@ test('local server, project storage, input validation and unavailable AI gateway
   t.after(() => fs.promises.rm(path.join(root, 'storage', 'projects', `${saved.data.id}.json`), { force: true }));
   const loaded = await json(`/api/projects/${saved.data.id}`); assert.equal(loaded.data.project.slides.length, 5);
   const listed = await json('/api/projects'); assert.ok(listed.data.projects.some(p => p.id === saved.data.id));
+  const packStatus = await json('/api/template-pack'); assert.equal(packStatus.status, 200); assert.ok(Array.isArray(packStatus.data.installed));
+  const rejected = await json('/api/template-pack', 'POST', { id: '../unknown', image: 'bad' }); assert.equal(rejected.status, 400);
+  assert.equal(typeof status.data.providerConcurrency.openai, 'number');
   const img = await json('/api/render-slide', 'POST', { provider: 'openai', slideNumber: 1, slide: { approved: true, role: 'Hook', heading: 'Test', body: 'Content' }, brand: { name: 'Clinic' }, referenceImage: 'data:image/png;base64,aA==' }); assert.equal(img.status, 409); assert.match(img.data.error, /OPENAI_API_KEY/);
   if (!status.data.codexAvailable) { const draft = await json('/api/draft', 'POST', { topic: 'tooth sensitivity' }); assert.equal(draft.status, 500); assert.match(draft.data.error, /Codex CLI/); }
   const del = await json(`/api/projects/${saved.data.id}`, 'DELETE'); assert.equal(del.status, 200);
   const missing = await json(`/api/projects/${saved.data.id}`); assert.equal(missing.status, 404);
+});
+
+test('parallel provider queue honors configured concurrency and still runs independent jobs', async () => {
+  const limit = providerConcurrency.openai;
+  assert.ok(limit >= 1 && limit <= 5);
+  let inFlight = 0, observedMax = 0, completed = 0;
+  await Promise.all(Array.from({ length: 11 }, (_, index) =>
+    withProviderSlot('openai', async () => {
+      inFlight++; observedMax = Math.max(observedMax, inFlight);
+      await new Promise(resolve => setTimeout(resolve, 10));
+      inFlight--; completed++; return index;
+    })
+  ));
+  assert.equal(completed, 11);
+  assert.equal(observedMax, limit);
+});
+test('master reference metadata describes ten distinct full-width five-slide boards', () => {
+  assert.equal(DESIGN_SYSTEMS.length, 10);
+  assert.equal(new Set(DESIGN_SYSTEMS.map(t => t.id)).size, 10);
+  assert.ok(DESIGN_SYSTEMS.every(t => t.master && t.crop.bottom > t.crop.top));
+});
+test('local installation endpoint rejects unrecognized template names', async () => {
+  // Exercised in the app's server smoke test below as well.
+  assert.equal(DESIGN_SYSTEMS.some(t => t.id === 'unknown'), false);
 });
