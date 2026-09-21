@@ -92,33 +92,69 @@ async function rewriteSlide() {
   catch (err) { toast(`Could not revise: ${err.message}`); } finally { state.busy = ''; render(); }
 }
 function approveSlide() { const s = current(); if (s.approved) s.approved = false; else { if (!s.heading.trim() || !s.body.trim()) return toast('Add a heading and body before approving.'); s.approved = true; if (state.index < 4) state.index++; } state.correction = ''; scheduleSave(); render(); }
-async function referenceDataUrl() {
-  const source = activeTemplate().img;
-  if (/^data:image\//i.test(source)) return source;
-  const response = await fetch(source); if (!response.ok) throw new Error('Could not load the selected template reference.');
-  return optimizedImage(await response.blob(), 1280);
+async function loadReference() {
+  const template = activeTemplate();
+  const source = template.img;
+  if (!template.master && /^data:image\//i.test(source)) return { referenceImage: source };
+  const response = await fetch(source);
+  if (!response.ok) throw new Error('Selected template image is missing. Install the master design pack again.');
+  const blob = await response.blob();
+  if (!template.master) return { referenceImage: await optimizedImage(blob, 1280) };
+  return { blob, template, masterReferenceImage: await optimizedImage(blob, 1600) };
 }
-async function generateImage(index = state.index, batch = false) {
-  const slide = state.project.slides[index];
-  if (!slide.approved) { if (!batch) toast('Approve this slide before generating final artwork.'); return false; }
-  if (!slide.visualPrompt?.trim()) { if (!batch) toast('Add a visual description for this slide first.'); return false; }
+async function generateImage(index = state.index, batch = false, reference = null) {
+  const project = state.project, slide = project.slides[index];
+  if (!slide?.approved) { if (!batch) toast('Approve this slide before generating artwork.'); return false; }
+  if (!slide.visualPrompt?.trim()) { if (!batch) toast('Add a visual description first.'); return false; }
   if (!batch) { state.busy = 'image'; render(); }
   try {
-    const provider = state.project.generation?.provider;
-    const { image } = await api('/api/render-slide', { provider, model: state.project.generation?.model, slide, slideNumber: index + 1, brand: state.project.brand, referenceImage: await referenceDataUrl(), logoImage: state.project.brand?.logo || '' });
-    Object.assign(slide, { artwork: image, artworkProvider: state.status.imageProviders?.[state.project.generation?.provider]?.label || state.project.generation?.provider, artworkGeneratedAt: new Date().toISOString() });
-    scheduleSave(); if (!batch) toast('Final slide artwork generated. Verify every rendered word before export.'); return true;
-  } catch (err) { toast(`Artwork generation failed: ${err.message}`); return false; }
-  finally { if (!batch) { state.busy = ''; render(); } }
+    const refs = reference || await loadReference();
+    const referenceImage = refs.blob ? await slideReference(refs.blob, refs.template.crop, index) : refs.referenceImage;
+    const provider = project.generation?.provider;
+    const { image } = await api('/api/render-slide', {
+      provider, model: project.generation?.model, slide, slideNumber: index + 1,
+      brand: project.brand, referenceImage, masterReferenceImage: refs.masterReferenceImage || '',
+      logoImage: project.brand?.logo || ''
+    });
+    if (state.project !== project || project.slides[index] !== slide) return false;
+    Object.assign(slide, {
+      artwork: image, artworkProvider: state.status.imageProviders?.[provider]?.label || provider,
+      artworkGeneratedAt: new Date().toISOString()
+    });
+    scheduleSave();
+    if (!batch) toast('Slide generated. Check every Malayalam and English word before export.');
+    return true;
+  } catch (err) {
+    if (!batch) toast('Artwork generation failed: ' + err.message);
+    else state.batchErrors.push('Slide ' + (index + 1) + ': ' + err.message);
+    return false;
+  } finally { if (!batch) { state.busy = ''; render(); } }
 }
 async function generateAll() {
+  const project = state.project;
+  const pending = project.slides.map((slide, index) => ({ slide, index })).filter(({ slide }) => !slide.artwork);
+  const provider = project.generation?.provider;
+  const runners = Math.min(pending.length, Math.max(1, state.status.providerConcurrency?.[provider] || 1));
+  state.batchDone = 0; state.batchTotal = pending.length; state.batchErrors = [];
   state.busy = 'all-images'; render();
   try {
-    for (let i = 0; i < state.project.slides.length; i++) {
-      if (!state.project.slides[i].artwork && !(await generateImage(i, true))) break;
-    }
-    scheduleSave(); toast(`Generated artwork: ${artworkCount()} / 5. Review each slide carefully.`);
-  } finally { state.busy = ''; render(); }
+    const reference = await loadReference();
+    let next = 0;
+    await Promise.all(Array.from({ length: runners }, async () => {
+      while (next < pending.length && state.project === project) {
+        const { index } = pending[next++];
+        await generateImage(index, true, reference);
+        state.batchDone++;
+        const progress = $('#batch-progress');
+        if (progress) progress.textContent = 'Completed ' + state.batchDone + ' / ' + state.batchTotal + ' slides · ' + artworkCount() + ' generated';
+      }
+    }));
+    scheduleSave();
+    toast(state.batchErrors.length
+      ? 'Generated ' + artworkCount() + ' / 5 slides; ' + state.batchErrors.join(' | ').slice(0, 400)
+      : 'Generated ' + artworkCount() + ' / 5 slides in parallel. Review each carefully.');
+  } catch (err) { toast('Could not start batch: ' + err.message); }
+  finally { state.busy = ''; render(); }
 }
 function getSocialCopy() { const c = captionFallback(state.project); return { instagram: state.project.instagram || c.instagram, youtubeTitle: state.project.youtubeTitle || c.youtubeTitle, youtubeDescription: state.project.youtubeDescription || c.youtubeDescription }; }
 async function downloadOne() { state.busy = 'export'; render(); try { downloadBlob(await finalArtworkBlob(current().artwork), `${String(state.index + 1).padStart(2, '0')}.png`); } catch (err) { toast(err.message); } finally { state.busy = ''; render(); } }
@@ -155,6 +191,22 @@ async function onFileInput(target) {
   const file = target.files?.[0]; if (!file) return;
   try {
     const purpose = target.dataset.fileAction;
+    if (purpose === 'template-pack') {
+      if (state.busy) return toast('Wait until the current operation finishes.');
+      state.busy = 'pack'; state.packProgress = 'Reading the ten high-quality design boards…'; render();
+      try {
+        const installed = await installTemplatePack(file, (done, total) => {
+          state.packProgress = 'Installed ' + done + ' / ' + total + ' images…';
+          const progress = $('#pack-progress'); if (progress) progress.textContent = state.packProgress;
+        });
+        state.installedSystems = new Set(installed.installed);
+        if (!state.project.brand.logo) { state.project.brand.logo = installed.logo; invalidateArtwork(); }
+        state.project.template = DESIGN_SYSTEMS[0].id;
+        state.packProgress = 'All 10 master templates installed and available for every new project.';
+        scheduleSave(); toast('Installed 10 master designs. Select any of them to use across five slides.');
+      } finally { state.busy = ''; render(); }
+      return;
+    }
     if (purpose === 'import') {
       const p = JSON.parse(await file.text()); if (!p || !Array.isArray(p.slides) || p.slides.length !== 5 || !p.brand) throw new Error('Not a SmileCraft five-slide project.');
       const defaults = newProject(); state.project = { ...defaults, ...p, id: '', updatedAt: '', brand: { ...defaults.brand, ...(p.brand || {}) }, generation: normalizeGeneration(p, defaults) }; delete state.project.models; state.project.slides = state.project.slides.map((slide, i) => ({ ...defaults.slides[i], ...slide, artwork: slide.artwork || '' })); state.index = 0; state.view = 'create'; state.project.stage = 1; render(); await saveProject(true); return;
@@ -183,7 +235,7 @@ async function onAction(node) {
     case 'select-slide': state.index = i; state.correction = ''; return render();
     case 'approve': return approveSlide();
     case 'revise': return rewriteSlide();
-    case 'choose-template': if (state.project.template !== value) invalidateArtwork(); state.project.template = value; scheduleSave(); if (state.view === 'templates') { state.view = 'create'; state.project.stage = 2; } return render();
+    case 'choose-template': if (!allTemplates().some(t => t.id === value)) return toast('Install the master template pack first.'); if (state.project.template !== value) invalidateArtwork(); state.project.template = value; scheduleSave(); if (state.view === 'templates') { state.view = 'create'; state.project.stage = 2; } return render();
     case 'generate-image': return generateImage();
     case 'generate-all': return generateAll();
     case 'clear-artwork': Object.assign(current(), { artwork: '', artworkProvider: '', artworkGeneratedAt: '' }); scheduleSave(); return render();
@@ -204,6 +256,8 @@ el.addEventListener('input', event => { if (event.target.id === 'correction') st
 el.addEventListener('change', event => { if (event.target.dataset.fileAction) onFileInput(event.target); else if (event.target.dataset.generation) directUpdate(event.target); });
 await listProjects();
 try {
+  const pack = await api('/api/template-pack');
+  state.installedSystems = new Set(pack.installed || []);
   state.status = await api('/api/status');
   if (state.status.textProviders?.antigravity?.available) await refreshAgyModels();
   const selected = state.project.generation?.provider;
