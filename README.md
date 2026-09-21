@@ -31,6 +31,20 @@ For copy generation and rewrites, choose **Codex CLI, OpenAI API, Gemini API, An
 
 **Important:** A ChatGPT/Codex login is not the same as an OpenAI API key. The app does not claim that using the CLI makes separately billed image generation free.
 
+## Ten AI-generated master design systems
+
+Each master is one high-resolution AI-generated five-slide board, not a Canvas or CSS recreation. Choose one in Design and it will guide all five pages. Generation receives both the full board and an enlarged crop of the corresponding slide. Slides 1–4 remain informational with logo only; slide 5 alone has an appointment call-to-action, phone and location.
+
+One-time image installation: download the companion SmileCraft_10_Design_Systems.zip included in the project delivery. In the local app, open the Design step and use Install 10 master designs from ZIP. The app stores the unmodified AI boards locally under web/assets/design-systems/. The original ZIP uses uncompressed STORE entries; do not recompress it before import. Since the binary image assets are not in this Git branch, a fresh checkout needs this one-time installation.
+
+Clinic branding defaults to Dr. Pooja's Smile Craft Dental Clinic, phone 7907006842 and Sreenarayanapuram, Ezhupunna. Uploading the pack also supplies the exact clinic logo as an image reference. Settings remain editable.
+
+### Parallel image runners
+
+Generate missing slides starts up to the server-advertised number of independent simultaneous renders. A shared per-provider queue enforces the limit even across overlapping projects. Defaults: OpenAI API = 5, Gemini API = 5, Codex CLI = 2, Antigravity CLI = 2. To reduce or adjust each provider, set IMAGE_PARALLEL_OPENAI, IMAGE_PARALLEL_GEMINI, IMAGE_PARALLEL_CODEX, or IMAGE_PARALLEL_ANTIGRAVITY (integers 1 to 5) in the server environment and restart. Rate-limit or overload responses (429/503) from API providers are retried with backoff. Available account quota and machine resources may be lower than these defaults; reduce concurrency if you see failures. Parallel API calls may consume paid quota faster.
+
+Always verify the final Malayalam-English text, exact clinic logo, clinical information and phone/location; image generation does not guarantee pixel-identical layouts or perfectly spelled text.
+
 ## Final artwork providers
 
 The app includes template-reference images and accepts custom PNG/JPEG/WebP references. For every slide it sends the approved heading/body, visual direction, selected reference, exact clinic details, brand colors, and optional logo to one of these providers:
