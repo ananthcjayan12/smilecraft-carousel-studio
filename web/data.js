@@ -88,11 +88,11 @@ export function starterSlides(topic = '') {
   ]).map((s, i) => ({ id: `slide-${i + 1}`, role: ROLES[i], heading: s[0], body: s[1], visualPrompt: s[2], approved: false, artwork: '', artworkProvider: '', artworkGeneratedAt: '' }));
 }
 export function newProject(topic = '', key = '') {
-  return { id: '', topic, key, template: 'editorial', slides: starterSlides(topic), instagram: '', youtubeTitle: '', youtubeDescription: '', brand: { name: 'SmileCraft Dental Clinic', phone: '', tagline: 'DENTAL CLINIC', primary: '#073a42', accent: '#14ada9', logo: '' }, generation: { writingProvider: 'codex', writingModel: 'gpt-5.6-sol', provider: 'openai', model: 'gpt-image-2' }, customTemplates: [], selectedReference: '', updatedAt: '', stage: 0 };
+  return { id: '', topic, key, template: 'editorial', slides: starterSlides(topic), instagram: '', youtubeTitle: '', youtubeDescription: '', brand: { name: "Dr. Pooja's Smile Craft Dental Clinic", phone: '7907006842', location: 'Sreenarayanapuram, Ezhupunna', tagline: 'DENTAL CLINIC', primary: '#073a42', accent: '#14ada9', logo: '' }, generation: { writingProvider: 'codex', writingModel: 'gpt-5.6-sol', provider: 'openai', model: 'gpt-image-2' }, customTemplates: [], selectedReference: '', updatedAt: '', stage: 0 };
 }
 export function captionFallback(p) {
   const t = p.topic || 'ദന്താരോഗ്യം';
   const clinic = p.brand?.name || 'Dental Clinic';
-  const contact = p.brand?.phone ? `\n${clinic} · ${p.brand.phone}` : `\n${clinic}`;
+  const contact = p.brand?.phone ? `\n${clinic} · ${p.brand.phone}${p.brand.location ? ' · ' + p.brand.location : ''}` : `\n${clinic}`;
   return { instagram: `${t}\n\n${p.slides.slice(0, 4).map(s => s.heading + ' — ' + s.body).join('\n\n')}\n\n${p.slides[4].body}${contact}\n\n#DentalClinic #OralHealth #MalayalamDentalTips`, youtubeTitle: `${t} | ${clinic}`, youtubeDescription: `${t}\n\n${p.slides.map((s, i) => `${i + 1}. ${s.heading}: ${s.body}`).join('\n\n')}${contact}\n\n#DentalCare #Malayalam` };
 }
