@@ -74,6 +74,13 @@ test('local server, project storage, input validation and unavailable AI gateway
   const packStatus = await json('/api/template-pack'); assert.equal(packStatus.status, 200); assert.ok(Array.isArray(packStatus.data.installed));
   const rejected = await json('/api/template-pack', 'POST', { id: '../unknown', image: 'bad' }); assert.equal(rejected.status, 400);
   assert.equal(typeof status.data.providerConcurrency.openai, 'number');
+  assert.deepEqual(Object.keys(status.data.providerConcurrency).sort(), ['antigravity', 'codex', 'gemini', 'openai']);
+  assert.deepEqual(Object.keys(status.data.textConcurrency).sort(), ['antigravity', 'claude', 'codex', 'gemini', 'openai']);
+  const activity = await json('/api/generation-activity');
+  assert.equal(activity.status, 200);
+  assert.equal(activity.data.image.openai.limit, status.data.providerConcurrency.openai);
+  assert.equal(activity.data.text.claude.limit, status.data.textConcurrency.claude);
+  assert.equal(activity.data.image.openai.active, 0);
   const img = await json('/api/render-slide', 'POST', { provider: 'openai', slideNumber: 1, slide: { approved: true, role: 'Hook', heading: 'Test', body: 'Content' }, brand: { name: 'Clinic' }, referenceImage: 'data:image/png;base64,aA==' }); assert.equal(img.status, 409); assert.match(img.data.error, /OPENAI_API_KEY/);
   if (!status.data.codexAvailable) { const draft = await json('/api/draft', 'POST', { topic: 'tooth sensitivity' }); assert.equal(draft.status, 500); assert.match(draft.data.error, /Codex CLI/); }
   const del = await json(`/api/projects/${saved.data.id}`, 'DELETE'); assert.equal(del.status, 200);
