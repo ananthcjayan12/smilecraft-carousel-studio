@@ -7,7 +7,7 @@ import { fileURLToPath } from 'node:url';
 import { availableAgyModels, runTextProvider, textProviderStatus } from './text-providers.mjs';
 import { generateSlideImage, imageProviderStatus } from './image-providers.mjs';
 import { inspectCli } from './cli-tools.mjs';
-import { providerConcurrency, withProviderSlot } from './provider-concurrency.mjs';
+import { providerConcurrency, textConcurrency, providerActivity, withProviderSlot } from './provider-concurrency.mjs';
 import { MASTER_TEMPLATE_IDS } from '../web/design-systems.js';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -43,7 +43,10 @@ const server = http.createServer(async (req, res) => {
       Object.assign(imageProviders.codex, { installed: codexAvailable, authenticated: codexAuthenticated, path: codexCli.binary, version: codexCli.version, error: codexCli.error });
       Object.assign(textProviders.antigravity, { path: antigravityCli.binary, version: antigravityCli.version, error: antigravityCli.error });
       Object.assign(imageProviders.antigravity, { path: antigravityCli.binary, version: antigravityCli.version, error: antigravityCli.error });
-      return send(res, 200, { codexAvailable, codexAuthenticated, cli: { codex: codexCli, antigravity: antigravityCli }, textProviders, imageProviders, providerConcurrency, localOnly: host === '127.0.0.1' || host === 'localhost' });
+      return send(res, 200, { codexAvailable, codexAuthenticated, cli: { codex: codexCli, antigravity: antigravityCli }, textProviders, imageProviders, providerConcurrency, textConcurrency, localOnly: host === '127.0.0.1' || host === 'localhost' });
+    }
+    if (u.pathname === '/api/generation-activity' && req.method === 'GET') {
+      return send(res, 200, { image: providerActivity('image'), text: providerActivity('text') });
     }
     if (u.pathname === '/api/template-pack' && req.method === 'GET') {
       const installed = [];
@@ -100,13 +103,13 @@ const server = http.createServer(async (req, res) => {
       const data = await body(req, 70_000);
       if (!String(data.topic || '').trim()) return send(res, 400, { error: 'Enter a topic before generating copy.' });
       const clinic = { name: String(data.clinic?.name || '').slice(0, 80), phone: String(data.clinic?.phone || '').slice(0, 40) };
-      return send(res, 200, { draft: await runTextProvider('draft', { topic: String(data.topic).slice(0, 450), notes: String(data.notes || '').slice(0, 2000), language: 'Malayalam-English mix', clinic, provider: String(data.provider || 'codex').slice(0, 30), model: String(data.model || '').slice(0, 100), workDir: path.join(root, 'storage'), outputName: 'carousel-draft' }) });
+      return send(res, 200, { draft: await withProviderSlot(String(data.provider || 'codex').slice(0, 30), () => runTextProvider('draft', { topic: String(data.topic).slice(0, 450), notes: String(data.notes || '').slice(0, 2000), language: 'Malayalam-English mix', clinic, provider: String(data.provider || 'codex').slice(0, 30), model: String(data.model || '').slice(0, 100), workDir: path.join(root, 'storage'), outputName: 'carousel-draft' }), 'text') });
     }
     if (u.pathname === '/api/revise' && req.method === 'POST') {
       const data = await body(req, 80_000);
       if (!data.slide?.heading || !String(data.correction || '').trim()) return send(res, 400, { error: 'A slide and correction are required.' });
       const clinic = { name: String(data.clinic?.name || '').slice(0, 80), phone: String(data.clinic?.phone || '').slice(0, 40) };
-      return send(res, 200, { slide: await runTextProvider('revise', { topic: String(data.topic).slice(0, 450), slide: data.slide, correction: String(data.correction).slice(0, 1800), role: data.slide.role, clinic, provider: String(data.provider || 'codex').slice(0, 30), model: String(data.model || '').slice(0, 100), workDir: path.join(root, 'storage'), outputName: `slide-${String(data.slide.id || 'revision').slice(0, 30)}` }) });
+      return send(res, 200, { slide: await withProviderSlot(String(data.provider || 'codex').slice(0, 30), () => runTextProvider('revise', { topic: String(data.topic).slice(0, 450), slide: data.slide, correction: String(data.correction).slice(0, 1800), role: data.slide.role, clinic, provider: String(data.provider || 'codex').slice(0, 30), model: String(data.model || '').slice(0, 100), workDir: path.join(root, 'storage'), outputName: `slide-${String(data.slide.id || 'revision').slice(0, 30)}` }), 'text') });
     }
     if (u.pathname === '/api/render-slide' && req.method === 'POST') {
       const data = await body(req, 30_000_000);
