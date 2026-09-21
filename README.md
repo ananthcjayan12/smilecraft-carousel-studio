@@ -37,14 +37,16 @@ The app includes template-reference images and accepts custom PNG/JPEG/WebP refe
 
 - **OpenAI API:** set `OPENAI_API_KEY`; optional `OPENAI_IMAGE_MODEL` defaults to `gpt-image-2`, and `OPENAI_IMAGE_QUALITY` defaults to `high`.
 - **Gemini API:** set `GEMINI_API_KEY`; optional `GEMINI_IMAGE_MODEL` defaults to `gemini-3.1-flash-image`.
-- **Codex CLI (experimental):** install/authenticate Codex and ensure its `$imagegen` capability is available. This runs in a temporary workspace and must produce `final-slide.png`.
-- **Antigravity CLI (`agy`):** install/authenticate `agy` and ensure its native `generate_image` tool is available. Set `AGY_BIN` if the executable has a custom path; `AGY_IMAGE_TIMEOUT` defaults to `5m`.
+- **Codex CLI (experimental):** install/authenticate Codex and ensure its `$imagegen` capability is available. The template and logo are attached with Codex's image-input option; generation runs in a temporary workspace and must produce `final-slide.png`. Set `CODEX_BIN` only when the executable is in a non-standard location.
+- **Antigravity CLI (`agy`):** install/authenticate `agy` and ensure its native `generate_image` tool is available. Artwork runs in an isolated temporary sandbox with headless tool approval enabled because `agy -p` cannot show interactive approval prompts. The app reads the signed-in account's live model list from `agy models`. Set `AGY_BIN` if the executable has a custom path; `AGY_IMAGE_TIMEOUT` defaults to `10m`.
 
 Example: `OPENAI_API_KEY='your-key' npm start` or `GEMINI_API_KEY='your-key' npm start`. API keys stay in the server environment and are not stored in the project/browser. API calls may incur provider charges. Codex and Antigravity use their own authenticated CLI quota and availability.
 
-Choose the **Codex writing model** in the Topic or Content step. In the Design step, choose the **image provider** and then one of that provider's supported image models; there are no free-text model fields.
+Choose the **writing provider and model** in the Topic or Content step. In the Design step, choose the **image provider** and then one of that provider's supported image models; there are no free-text model fields.
 
 Claude API is available for copy and corrections. Claude supports image understanding but its API returns text rather than a generated raster image, so final slide rendering uses OpenAI, Gemini, Codex image generation, or Antigravity.
+
+Structured text calls follow the hardened provider handling used by the Video Cleaner project: schema-constrained Codex/AGY/Claude output, tool-free AGY prompting, provider-specific response validation, long-running timeouts, one AGY semantic retry, and diagnostic JSON under `storage/generation-logs/text/` when a provider fails.
 
 Generated artwork is stored per slide. Editing approved copy, changing the selected reference, or changing clinic branding invalidates affected artwork. Image models can still misspell text—especially Malayalam—so Review shows the approved source copy beside the generated image and export remains a human-reviewed step.
 

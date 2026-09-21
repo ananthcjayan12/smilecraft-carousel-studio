@@ -1,5 +1,5 @@
 import { spawn } from 'node:child_process';
-import { mkdtemp, readFile, writeFile, rm, stat } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, writeFile, rm, stat } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 
@@ -21,6 +21,16 @@ function bufferDataUrl(bytes) {
   if (bytes[0] === 0xff && bytes[1] === 0xd8) mime = 'image/jpeg';
   else if (bytes.subarray(0, 4).toString() === 'RIFF' && bytes.subarray(8, 12).toString() === 'WEBP') mime = 'image/webp';
   return outputDataUrl(bytes.toString('base64'), mime);
+}
+function findBase64Image(value) {
+  if (!value) return undefined;
+  if (Array.isArray(value)) { for (const child of value) { const found = findBase64Image(child); if (found) return found; } return undefined; }
+  if (typeof value === 'object') {
+    if (typeof value.data === 'string' && (value.type === 'image' || value.mime_type?.startsWith?.('image/') || value.mimeType?.startsWith?.('image/'))) return value.data;
+    if (typeof value.b64_json === 'string') return value.b64_json;
+    for (const child of Object.values(value)) { const found = findBase64Image(child); if (found) return found; }
+  }
+  return undefined;
 }
 
 export function buildSlideImagePrompt({ slide, slideNumber, brand }) {
@@ -58,10 +68,11 @@ async function fetchJson(url, options, timeoutMs = 180000) {
 
 async function openaiImage(prompt, reference, logo, requestedModel) {
   if (!process.env.OPENAI_API_KEY) throw Object.assign(new Error('OpenAI generation requires OPENAI_API_KEY in the server environment.'), { status: 409 });
+  const model = limit(requestedModel, 80).trim() || process.env.OPENAI_IMAGE_MODEL || 'gpt-image-2';
   const form = new FormData();
-  form.append('model', limit(requestedModel, 80).trim() || process.env.OPENAI_IMAGE_MODEL || 'gpt-image-2');
+  form.append('model', model);
   form.append('prompt', prompt);
-  form.append('size', '1024x1280');
+  form.append('size', model === 'gpt-image-2' ? '1024x1280' : '1024x1536');
   form.append('quality', process.env.OPENAI_IMAGE_QUALITY || 'high');
   form.append('output_format', 'png');
   form.append('image[]', new Blob([reference.bytes], { type: reference.mime }), `template.${reference.mime.split('/')[1]}`);
@@ -73,15 +84,14 @@ async function openaiImage(prompt, reference, logo, requestedModel) {
 async function geminiImage(prompt, reference, logo, requestedModel) {
   if (!process.env.GEMINI_API_KEY) throw Object.assign(new Error('Gemini generation requires GEMINI_API_KEY in the server environment.'), { status: 409 });
   const model = limit(requestedModel, 100).trim() || process.env.GEMINI_IMAGE_MODEL || 'gemini-3.1-flash-image';
-  const parts = [{ text: prompt }, { inlineData: { mimeType: reference.mime, data: reference.base64 } }];
-  if (logo) parts.push({ inlineData: { mimeType: logo.mime, data: logo.base64 } });
-  const json = await fetchJson(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`, {
+  const input = [{ type: 'text', text: prompt }, { type: 'image', mime_type: reference.mime, data: reference.base64 }];
+  if (logo) input.push({ type: 'image', mime_type: logo.mime, data: logo.base64 });
+  const json = await fetchJson('https://generativelanguage.googleapis.com/v1beta/interactions', {
     method: 'POST',
     headers: { 'x-goog-api-key': process.env.GEMINI_API_KEY, 'Content-Type': 'application/json' },
-    body: JSON.stringify({ contents: [{ role: 'user', parts }], generationConfig: { responseModalities: ['IMAGE'], imageConfig: { aspectRatio: '4:5' } } }),
+    body: JSON.stringify({ model, input, response_format: { type: 'image', mime_type: 'image/png', aspect_ratio: '4:5', image_size: '2K' } }),
   });
-  const image = json.candidates?.flatMap(candidate => candidate.content?.parts || []).find(part => part.inlineData?.data)?.inlineData;
-  return outputDataUrl(image?.data, image?.mimeType || 'image/png');
+  return outputDataUrl(findBase64Image(json), 'image/png');
 }
 
 function runProcess(command, args, options, timeoutMs = 300000) {
@@ -92,10 +102,31 @@ function runProcess(command, args, options, timeoutMs = 300000) {
     const finish = (error, value) => { if (settled) return; settled = true; clearTimeout(timer); error ? reject(error) : resolve(value); };
     child.stdout.on('data', chunk => { if (stdout.length < 24_000_000) stdout += chunk; });
     child.stderr.on('data', chunk => { if (stderr.length < 50_000) stderr += chunk; });
-    child.on('error', error => finish(new Error(error.code === 'ENOENT' ? `${command} is not installed or is not on PATH.` : error.message)));
-    child.on('close', code => finish(code === 0 ? null : new Error(`${command} exited with code ${code}. ${limit(stderr, 800)}`), { stdout, stderr }));
+    child.on('error', error => { const wrapped = new Error(error.code === 'ENOENT' ? `${command} is not installed or is not on PATH.` : error.message); wrapped.stdout = stdout; wrapped.stderr = stderr; finish(wrapped); });
+    child.on('close', code => { if (code === 0) return finish(null, { stdout, stderr }); const error = new Error(`${path.basename(command)} exited with code ${code}. ${limit(stderr || stdout, 1200)}`); error.stdout = stdout; error.stderr = stderr; finish(error); });
     if (options.input) child.stdin.end(options.input); else child.stdin.end();
   });
+}
+
+export function parseAgyImageEnvelope(raw) {
+  let envelope;
+  try { envelope = JSON.parse(String(raw || '').trim()); } catch { throw new Error('Antigravity returned an invalid JSON response.'); }
+  if (!envelope || typeof envelope !== 'object' || Array.isArray(envelope)) throw new Error('Antigravity returned an invalid response envelope.');
+  if (envelope.status !== 'SUCCESS') throw new Error(`Antigravity image generation failed: ${envelope.error || envelope.status || 'unknown error'}`);
+  if (envelope.denied_actions?.length) {
+    const actions = envelope.denied_actions.map(action => action.display_name || action.action || 'unknown tool').join(', ');
+    throw new Error(`Antigravity could not generate the image because tool permission was denied (${actions}).`);
+  }
+  return envelope;
+}
+
+async function writeImageLog(workDir, details) {
+  if (!workDir) return undefined;
+  try {
+    const directory = path.join(workDir, 'generation-logs', 'image'); await mkdir(directory, { recursive: true });
+    const stamp = new Date().toISOString().replace(/[:.]/g, '-'); const file = path.join(directory, `${details.provider}-${stamp}.json`);
+    await writeFile(file, JSON.stringify(details, null, 2)); return file;
+  } catch { return undefined; }
 }
 
 async function writeReferenceFiles(work, reference, logo) {
@@ -111,10 +142,14 @@ async function codexImage(prompt, reference, logo, requestedModel) {
   try {
     const { referencePath, logoPath } = await writeReferenceFiles(work, reference, logo);
     const outputPath = path.join(work, 'final-slide.png');
-    const instruction = `$imagegen\nGenerate the final image described below. Use ${path.basename(referencePath)} as the visual reference${logoPath ? ` and ${path.basename(logoPath)} as the exact clinic logo` : ''}. Save the final PNG at exactly ${outputPath}. Do not only describe it; create the file.\n\n${prompt}`;
+    await runProcess('git', ['init', '-q'], { cwd: work, env: { ...process.env } }, 10000);
+    const instruction = `$imagegen\nGenerate the final image described below. Inspect ${path.basename(referencePath)} as the visual reference${logoPath ? ` and ${path.basename(logoPath)} as the exact clinic logo` : ''}. Generate ONE finished image using HIGH image quality and save it in the current working directory as final-slide.png. Use Codex built-in image generation. Do NOT call the OpenAI API manually. Do NOT create a Python image-generation script. Do not only describe it; actually generate the file.\n\n${prompt}`;
     const model = limit(requestedModel, 100).trim();
-    await runProcess(process.env.CODEX_BIN || 'codex', ['exec', '--skip-git-repo-check', '--sandbox', 'workspace-write', '--ephemeral', ...(model ? ['--model', model] : []), instruction], { cwd: work, env: { ...process.env, CI: '1' } });
-    await stat(outputPath).catch(() => { throw new Error('Codex completed without writing final-slide.png. This Codex installation may not have image generation enabled.'); });
+    const env = { ...process.env, CI: '1' }; delete env.OPENAI_API_KEY; delete env.CODEX_API_KEY;
+    const images = logoPath ? [referencePath, logoPath] : [referencePath];
+    await runProcess(process.env.CODEX_BIN || 'codex', ['exec', '--ephemeral', ...(model ? ['--model', model] : []), '--sandbox', 'workspace-write', '--image', ...images, '--', instruction], { cwd: work, env }, 900000);
+    const generated = await stat(outputPath).catch(() => null);
+    if (!generated?.isFile() || generated.size < 10_000) throw new Error('Codex completed without creating a usable final-slide.png. Check Codex login and built-in image generation availability.');
     return bufferDataUrl(await readFile(outputPath));
   } finally { await rm(work, { recursive: true, force: true }); }
 }
@@ -124,10 +159,13 @@ async function antigravityImage(prompt, reference, logo, requestedModel) {
   try {
     const { referencePath, logoPath } = await writeReferenceFiles(work, reference, logo);
     const outputPath = path.join(work, 'final-slide.png');
-    const instruction = `Use your native generate_image tool exactly once to create the final image described below. Use ${path.basename(referencePath)} as the visual reference${logoPath ? ` and ${path.basename(logoPath)} as the exact clinic logo` : ''}. Use the closest supported portrait aspect ratio and keep all content inside a 4:5 safe area. After generation, copy the generated raster artifact to exactly ${outputPath}. Do not only describe the image; create and copy the file.\n\n${prompt}`;
+    const imagePaths = [path.basename(referencePath), ...(logoPath ? [path.basename(logoPath)] : [])];
+    const instruction = `Call the native generate_image tool to create the final image described below. Pass ImageName exactly as "final-slide.png" and ImagePaths exactly as ${JSON.stringify(imagePaths)}. Use the closest supported portrait aspect ratio and keep all content inside a 4:5 safe area. The required final file is ${outputPath}. Do not only describe the image; actually create the file.\n\n${prompt}`;
     const model = limit(requestedModel, 100).trim();
-    await runProcess(process.env.AGY_BIN || 'agy', ['--mode', 'accept-edits', ...(model ? ['--model', model] : []), '--print-timeout', process.env.AGY_IMAGE_TIMEOUT || '5m', '-p', instruction], { cwd: work, env: { ...process.env } }, 360000);
-    await stat(outputPath).catch(() => { throw new Error('Antigravity completed without writing final-slide.png. Confirm that this agy installation has the native generate_image tool and filesystem permission.'); });
+    const result = await runProcess(process.env.AGY_BIN || 'agy', ['--mode', 'accept-edits', '--sandbox', '--dangerously-skip-permissions', '--output-format', 'json', ...(model ? ['--model', model] : []), '--print-timeout', process.env.AGY_IMAGE_TIMEOUT || '10m', '-p', instruction], { cwd: work, env: { ...process.env } }, 660000);
+    parseAgyImageEnvelope(result.stdout);
+    const generated = await stat(outputPath).catch(() => null);
+    if (!generated?.isFile() || generated.size < 10_000) throw new Error('Antigravity completed without creating a usable final-slide.png. Confirm that this agy installation has the native generate_image tool and filesystem permission.');
     return bufferDataUrl(await readFile(outputPath));
   } finally { await rm(work, { recursive: true, force: true }); }
 }
@@ -146,9 +184,18 @@ export async function generateSlideImage(data) {
   const reference = parseDataUrl(data.referenceImage, 'Template reference');
   const logo = data.logoImage ? parseDataUrl(data.logoImage, 'Clinic logo') : null;
   const prompt = buildSlideImagePrompt(data);
-  if (data.provider === 'openai') return openaiImage(prompt, reference, logo, data.model);
-  if (data.provider === 'gemini') return geminiImage(prompt, reference, logo, data.model);
-  if (data.provider === 'codex') return codexImage(prompt, reference, logo, data.model);
-  if (data.provider === 'antigravity') return antigravityImage(prompt, reference, logo, data.model);
-  throw Object.assign(new Error('Choose a supported image provider.'), { status: 400 });
+  const started = Date.now();
+  try {
+    let image;
+    if (data.provider === 'openai') image = await openaiImage(prompt, reference, logo, data.model);
+    else if (data.provider === 'gemini') image = await geminiImage(prompt, reference, logo, data.model);
+    else if (data.provider === 'codex') image = await codexImage(prompt, reference, logo, data.model);
+    else if (data.provider === 'antigravity') image = await antigravityImage(prompt, reference, logo, data.model);
+    else throw Object.assign(new Error('Choose a supported image provider.'), { status: 400 });
+    await writeImageLog(data.workDir, { timestamp: new Date().toISOString(), provider: data.provider, model: data.model || '(provider default)', slideNumber: data.slideNumber, status: 'success', durationMs: Date.now() - started });
+    return image;
+  } catch (error) {
+    const logPath = await writeImageLog(data.workDir, { timestamp: new Date().toISOString(), provider: data.provider, model: data.model || '(provider default)', slideNumber: data.slideNumber, status: 'failed', durationMs: Date.now() - started, error: error.message, stdout: limit(error.stdout, 100000), stderr: limit(error.stderr, 30000) });
+    const wrapped = new Error(`${error.message}${logPath ? ` Diagnostic log: ${logPath}` : ''}`); wrapped.status = error.status; throw wrapped;
+  }
 }

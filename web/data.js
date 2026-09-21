@@ -88,7 +88,7 @@ export function starterSlides(topic = '') {
   ]).map((s, i) => ({ id: `slide-${i + 1}`, role: ROLES[i], heading: s[0], body: s[1], visualPrompt: s[2], approved: false, artwork: '', artworkProvider: '', artworkGeneratedAt: '' }));
 }
 export function newProject(topic = '', key = '') {
-  return { id: '', topic, key, template: 'editorial', slides: starterSlides(topic), instagram: '', youtubeTitle: '', youtubeDescription: '', brand: { name: 'SmileCraft Dental Clinic', phone: '', tagline: 'DENTAL CLINIC', primary: '#073a42', accent: '#14ada9', logo: '' }, generation: { writingProvider: 'codex', writingModel: 'gpt-5.6', provider: 'openai', model: 'gpt-image-2' }, customTemplates: [], selectedReference: '', updatedAt: '', stage: 0 };
+  return { id: '', topic, key, template: 'editorial', slides: starterSlides(topic), instagram: '', youtubeTitle: '', youtubeDescription: '', brand: { name: 'SmileCraft Dental Clinic', phone: '', tagline: 'DENTAL CLINIC', primary: '#073a42', accent: '#14ada9', logo: '' }, generation: { writingProvider: 'codex', writingModel: 'gpt-5.6-sol', provider: 'openai', model: 'gpt-image-2' }, customTemplates: [], selectedReference: '', updatedAt: '', stage: 0 };
 }
 export function captionFallback(p) {
   const t = p.topic || 'ദന്താരോഗ്യം';

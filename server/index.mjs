@@ -3,10 +3,10 @@ import fs from 'node:fs';
 import { readFile, writeFile, mkdir, readdir } from 'node:fs/promises';
 import path from 'node:path';
 import crypto from 'node:crypto';
-import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
-import { runTextProvider, textProviderStatus } from './text-providers.mjs';
+import { availableAgyModels, runTextProvider, textProviderStatus } from './text-providers.mjs';
 import { generateSlideImage, imageProviderStatus } from './image-providers.mjs';
+import { inspectCli } from './cli-tools.mjs';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const site = path.join(root, 'web');
@@ -23,14 +23,29 @@ function body(req, max = 18_000_000) { return new Promise((resolve, reject) => {
   req.on('end', () => { try { resolve(JSON.parse(data || '{}')); } catch { reject(Object.assign(new Error('Invalid JSON'), { status: 400 })); } });
   req.on('error', reject);
 }); }
-const codexCheck = spawnSync(process.env.CODEX_BIN || 'codex', ['--version'], { encoding: 'utf8', timeout: 4000 });
-const codexAvailable = codexCheck.status === 0;
-const antigravityCheck = spawnSync(process.env.AGY_BIN || 'agy', ['--version'], { encoding: 'utf8', timeout: 4000 });
-const antigravityAvailable = antigravityCheck.status === 0;
+const codexCli = inspectCli('codex', 'CODEX_BIN', { authArgs: ['login', 'status'] });
+const antigravityCli = inspectCli('agy', 'AGY_BIN');
+if (codexCli.installed) process.env.CODEX_BIN = codexCli.binary;
+if (antigravityCli.installed) process.env.AGY_BIN = antigravityCli.binary;
+const codexAvailable = codexCli.installed;
+const codexAuthenticated = codexCli.authenticated;
+const antigravityAvailable = antigravityCli.installed;
 const server = http.createServer(async (req, res) => {
   const u = new URL(req.url || '/', `http://${host}`);
   try {
-    if (u.pathname === '/api/status' && req.method === 'GET') return send(res, 200, { codexAvailable, textProviders: textProviderStatus(codexAvailable, antigravityAvailable), imageProviders: imageProviderStatus(codexAvailable, antigravityAvailable), localOnly: host === '127.0.0.1' || host === 'localhost' });
+    if (u.pathname === '/api/status' && req.method === 'GET') {
+      const textProviders = textProviderStatus(codexAvailable, antigravityAvailable, codexAuthenticated);
+      const imageProviders = imageProviderStatus(codexAvailable && codexAuthenticated, antigravityAvailable);
+      Object.assign(textProviders.codex, { path: codexCli.binary, version: codexCli.version, error: codexCli.error });
+      Object.assign(imageProviders.codex, { installed: codexAvailable, authenticated: codexAuthenticated, path: codexCli.binary, version: codexCli.version, error: codexCli.error });
+      Object.assign(textProviders.antigravity, { path: antigravityCli.binary, version: antigravityCli.version, error: antigravityCli.error });
+      Object.assign(imageProviders.antigravity, { path: antigravityCli.binary, version: antigravityCli.version, error: antigravityCli.error });
+      return send(res, 200, { codexAvailable, codexAuthenticated, cli: { codex: codexCli, antigravity: antigravityCli }, textProviders, imageProviders, localOnly: host === '127.0.0.1' || host === 'localhost' });
+    }
+    if (u.pathname === '/api/models/agy' && req.method === 'GET') {
+      if (!antigravityAvailable) return send(res, 409, { error: 'Antigravity CLI (agy) is not installed or is not on PATH.' });
+      return send(res, 200, { models: await availableAgyModels(process.env.AGY_BIN || 'agy') });
+    }
     if (u.pathname === '/api/projects' && req.method === 'GET') {
       const items = [];
       for (const f of await readdir(storage)) if (f.endsWith('.json')) {
@@ -60,17 +75,17 @@ const server = http.createServer(async (req, res) => {
       const data = await body(req, 70_000);
       if (!String(data.topic || '').trim()) return send(res, 400, { error: 'Enter a topic before generating copy.' });
       const clinic = { name: String(data.clinic?.name || '').slice(0, 80), phone: String(data.clinic?.phone || '').slice(0, 40) };
-      return send(res, 200, { draft: await runTextProvider('draft', { topic: String(data.topic).slice(0, 450), notes: String(data.notes || '').slice(0, 2000), language: 'Malayalam-English mix', clinic, provider: String(data.provider || 'codex').slice(0, 30), model: String(data.model || '').slice(0, 100) }) });
+      return send(res, 200, { draft: await runTextProvider('draft', { topic: String(data.topic).slice(0, 450), notes: String(data.notes || '').slice(0, 2000), language: 'Malayalam-English mix', clinic, provider: String(data.provider || 'codex').slice(0, 30), model: String(data.model || '').slice(0, 100), workDir: path.join(root, 'storage'), outputName: 'carousel-draft' }) });
     }
     if (u.pathname === '/api/revise' && req.method === 'POST') {
       const data = await body(req, 80_000);
       if (!data.slide?.heading || !String(data.correction || '').trim()) return send(res, 400, { error: 'A slide and correction are required.' });
       const clinic = { name: String(data.clinic?.name || '').slice(0, 80), phone: String(data.clinic?.phone || '').slice(0, 40) };
-      return send(res, 200, { slide: await runTextProvider('revise', { topic: String(data.topic).slice(0, 450), slide: data.slide, correction: String(data.correction).slice(0, 1800), role: data.slide.role, clinic, provider: String(data.provider || 'codex').slice(0, 30), model: String(data.model || '').slice(0, 100) }) });
+      return send(res, 200, { slide: await runTextProvider('revise', { topic: String(data.topic).slice(0, 450), slide: data.slide, correction: String(data.correction).slice(0, 1800), role: data.slide.role, clinic, provider: String(data.provider || 'codex').slice(0, 30), model: String(data.model || '').slice(0, 100), workDir: path.join(root, 'storage'), outputName: `slide-${String(data.slide.id || 'revision').slice(0, 30)}` }) });
     }
     if (u.pathname === '/api/render-slide' && req.method === 'POST') {
       const data = await body(req, 30_000_000);
-      return send(res, 200, { image: await generateSlideImage(data) });
+      return send(res, 200, { image: await generateSlideImage({ ...data, workDir: path.join(root, 'storage') }) });
     }
     if (req.method !== 'GET' && req.method !== 'HEAD') return send(res, 405, { error: 'Method not allowed.' });
     let file = path.resolve(site, `.${decodeURIComponent(u.pathname === '/' ? '/index.html' : u.pathname)}`);
