@@ -8,120 +8,89 @@ import { availableAgyModels, runTextProvider, textProviderStatus } from './text-
 import { generateSlideImage, imageProviderStatus } from './image-providers.mjs';
 import { inspectCli } from './cli-tools.mjs';
 import { providerConcurrency, textConcurrency, providerActivity, withProviderSlot } from './provider-concurrency.mjs';
-import { MASTER_TEMPLATE_IDS } from '../web/design-systems.js';
+import { publicBusinessPacks, getBusinessPack, resolveBusinessContext } from './business-packs.mjs';
+import { storageRoot, listClients, getClient, createClient, updateClient, listProjects, getProject, createProject, saveProject, applyLatestClientSettings, storeAsset, getAsset, listTemplates, listSharedTemplates, getTemplate, createJob, startJob, finishJob, listJobs, dashboard, migrationReport, migrateLegacy, importPortableProject, attachArtworkIfCurrent } from './store.mjs';
+import { stageTemplateImport, updateTemplateImport, installTemplateImport, cleanupImports } from './template-import.mjs';
 
-const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-const site = path.join(root, 'web');
-const storage = path.join(root, 'storage', 'projects');
-const templateStorage = path.join(site, 'assets', 'design-systems');
-const port = Number(process.env.PORT) || 4178;
-const host = process.env.HOST || '127.0.0.1';
-await mkdir(storage, { recursive: true });
-const mime = { '.html': 'text/html; charset=utf-8', '.css': 'text/css; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.json': 'application/json; charset=utf-8', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.png': 'image/png', '.svg': 'image/svg+xml', '.ico': 'image/x-icon', '.webp': 'image/webp' };
-const safeId = id => /^[\w-]{6,64}$/.test(id ?? '');
-function send(res, code, data) { res.writeHead(code, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff' }); res.end(JSON.stringify(data)); }
-function body(req, max = 18_000_000) { return new Promise((resolve, reject) => {
-  let data = ''; let bytes = 0;
-  req.on('data', chunk => { bytes += chunk.length; if (bytes > max) { reject(Object.assign(new Error('Request too large; resize uploaded images.'), { status: 413 })); req.destroy(); return; } data += chunk.toString(); });
-  req.on('end', () => { try { resolve(JSON.parse(data || '{}')); } catch { reject(Object.assign(new Error('Invalid JSON'), { status: 400 })); } });
-  req.on('error', reject);
-}); }
-const codexCli = inspectCli('codex', 'CODEX_BIN', { authArgs: ['login', 'status'] });
-const antigravityCli = inspectCli('agy', 'AGY_BIN');
-if (codexCli.installed) process.env.CODEX_BIN = codexCli.binary;
-if (antigravityCli.installed) process.env.AGY_BIN = antigravityCli.binary;
-const codexAvailable = codexCli.installed;
-const codexAuthenticated = codexCli.authenticated;
-const antigravityAvailable = antigravityCli.installed;
-const server = http.createServer(async (req, res) => {
-  const u = new URL(req.url || '/', `http://${host}`);
-  try {
-    if (u.pathname === '/api/status' && req.method === 'GET') {
-      const textProviders = textProviderStatus(codexAvailable, antigravityAvailable, codexAuthenticated);
-      const imageProviders = imageProviderStatus(codexAvailable && codexAuthenticated, antigravityAvailable);
-      Object.assign(textProviders.codex, { path: codexCli.binary, version: codexCli.version, error: codexCli.error });
-      Object.assign(imageProviders.codex, { installed: codexAvailable, authenticated: codexAuthenticated, path: codexCli.binary, version: codexCli.version, error: codexCli.error });
-      Object.assign(textProviders.antigravity, { path: antigravityCli.binary, version: antigravityCli.version, error: antigravityCli.error });
-      Object.assign(imageProviders.antigravity, { path: antigravityCli.binary, version: antigravityCli.version, error: antigravityCli.error });
-      return send(res, 200, { codexAvailable, codexAuthenticated, cli: { codex: codexCli, antigravity: antigravityCli }, textProviders, imageProviders, providerConcurrency, textConcurrency, localOnly: host === '127.0.0.1' || host === 'localhost' });
+const root=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'..'),site=path.join(root,'web'),legacyStorage=path.join(storageRoot,'projects'),port=Number(process.env.PORT)||4178,host=process.env.HOST||'127.0.0.1';
+await mkdir(legacyStorage,{recursive:true});await cleanupImports().catch(()=>{});
+const mime={'.html':'text/html; charset=utf-8','.css':'text/css; charset=utf-8','.js':'text/javascript; charset=utf-8','.json':'application/json; charset=utf-8','.jpg':'image/jpeg','.jpeg':'image/jpeg','.png':'image/png','.svg':'image/svg+xml','.ico':'image/x-icon','.webp':'image/webp'};
+const safeId=id=>/^[\w:-]{6,180}$/.test(id??'');
+function send(res,code,data){res.writeHead(code,{'Content-Type':'application/json; charset=utf-8','Cache-Control':'no-store','X-Content-Type-Options':'nosniff'});res.end(JSON.stringify(data))}
+function bodyBuffer(req,max=100_000_000){return new Promise((resolve,reject)=>{const chunks=[];let size=0;req.on('data',c=>{size+=c.length;if(size>max){reject(Object.assign(new Error('Request too large.'),{status:413}));req.destroy();return}chunks.push(c)});req.on('end',()=>resolve(Buffer.concat(chunks)));req.on('error',reject)})}
+async function body(req,max=20_000_000){const b=await bodyBuffer(req,max);try{return JSON.parse(b.toString()||'{}')}catch{throw Object.assign(new Error('Invalid JSON'),{status:400})}}
+function dataUrl(bytes,mimeType){return `data:${mimeType};base64,${bytes.toString('base64')}`}
+function parseDataUrl(v){const m=/^data:(image\/(?:png|jpeg|webp));base64,([A-Za-z0-9+/=]+)$/.exec(String(v||''));if(!m)throw Object.assign(new Error('Expected PNG, JPEG or WebP data URL.'),{status:400});return{mime:m[1],bytes:Buffer.from(m[2],'base64')}}
+const codexCli=inspectCli('codex','CODEX_BIN',{authArgs:['login','status']}),antigravityCli=inspectCli('agy','AGY_BIN');if(codexCli.installed)process.env.CODEX_BIN=codexCli.binary;if(antigravityCli.installed)process.env.AGY_BIN=antigravityCli.binary;
+const legacyTemplateIds=new Set(['teal-editorial-pro','clinical-white','warm-ivory','deep-teal-premium','mint-friendly','airy-aqua','kids-mint','nature-sage','warm-clinical','premium-charcoal']);
+const hash=value=>crypto.createHash('sha256').update(typeof value==='string'?value:JSON.stringify(value)).digest('hex');
+function routeParts(pathname){return pathname.split('/').filter(Boolean)}
+async function referenceFor(clientId,templateId,slideIndex){
+  const template=getTemplate(clientId,templateId);
+  if(!template) throw Object.assign(new Error('Choose a compatible installed template before generating artwork.'),{status:400});
+  if(template.mode==='slides'){
+    const ref=template.data.slides?.[slideIndex];
+    if(ref?.generated){
+      const {default:sharp}=await import('sharp');
+      const v=Number(ref.variant||slideIndex+1),shift=70*v;
+      const svg=Buffer.from(`<svg xmlns="http://www.w3.org/2000/svg" width="1080" height="1350"><rect width="1080" height="1350" fill="#eef8f7"/><rect width="1080" height="180" fill="#116771"/><rect x="90" y="260" width="900" height="780" rx="54" fill="white" stroke="#c8e0df" stroke-width="8"/><circle cx="${260+shift}" cy="490" r="150" fill="#219e9e"/><rect x="150" y="760" width="780" height="45" rx="8" fill="#1f5962"/><rect x="150" y="845" width="${Math.max(420,720-25*v)}" height="30" rx="6" fill="#8ebcbc"/><rect x="150" y="920" width="${Math.min(820,650+30*v)}" height="30" rx="6" fill="#bed8d6"/><rect x="150" y="1090" width="370" height="85" rx="35" fill="#0e8189"/></svg>`);
+      const bytes=await sharp(svg).png().toBuffer();
+      return {referenceImage:dataUrl(bytes,'image/png'),masterReferenceImage:''};
     }
-    if (u.pathname === '/api/generation-activity' && req.method === 'GET') {
-      return send(res, 200, { image: providerActivity('image'), text: providerActivity('text') });
-    }
-    if (u.pathname === '/api/template-pack' && req.method === 'GET') {
-      const installed = [];
-      for (const id of MASTER_TEMPLATE_IDS) {
-        if (fs.existsSync(path.join(templateStorage, id + '.png'))) installed.push(id);
-      }
-      return send(res, 200, { installed, logoInstalled: fs.existsSync(path.join(templateStorage, 'clinic-logo.jpg')) });
-    }
-    if (u.pathname === '/api/template-pack' && req.method === 'POST') {
-      const data = await body(req, 11_000_000);
-      const id = String(data.id || '');
-      const isLogo = id === 'clinic-logo';
-      if (!isLogo && !MASTER_TEMPLATE_IDS.has(id)) return send(res, 400, { error: 'Unknown template pack image.' });
-      const match = /^data:image\/(png|jpeg);base64,([A-Za-z0-9+/=]+)$/.exec(String(data.image || ''));
-      if (!match || (isLogo ? match[1] !== 'jpeg' : match[1] !== 'png')) return send(res, 400, { error: 'Expected a PNG design board or JPEG clinic logo.' });
-      const bytes = Buffer.from(match[2], 'base64');
-      const valid = isLogo ? bytes[0] === 0xff && bytes[1] === 0xd8 : bytes.subarray(0, 8).equals(Buffer.from('89504e470d0a1a0a', 'hex'));
-      if (!valid || bytes.length < 10_000 || bytes.length > 8_000_000) return send(res, 400, { error: 'Template image is invalid or too large.' });
-      await mkdir(templateStorage, { recursive: true });
-      const filename = isLogo ? 'clinic-logo.jpg' : id + '.png';
-      await writeFile(path.join(templateStorage, filename), bytes);
-      return send(res, 200, { ok: true, id });
-    }
-    if (u.pathname === '/api/models/agy' && req.method === 'GET') {
-      if (!antigravityAvailable) return send(res, 409, { error: 'Antigravity CLI (agy) is not installed or is not on PATH.' });
-      return send(res, 200, { models: await availableAgyModels(process.env.AGY_BIN || 'agy') });
-    }
-    if (u.pathname === '/api/projects' && req.method === 'GET') {
-      const items = [];
-      for (const f of await readdir(storage)) if (f.endsWith('.json')) {
-        try { const p = JSON.parse(await readFile(path.join(storage, f), 'utf8')); items.push({ id: p.id, topic: p.topic, updatedAt: p.updatedAt, template: p.template, approved: p.slides?.filter(s => s.approved).length || 0, count: p.slides?.length || 0 }); } catch {}
-      }
-      return send(res, 200, { projects: items.sort((a, b) => String(b.updatedAt).localeCompare(String(a.updatedAt))) });
-    }
-    if (u.pathname.startsWith('/api/projects/') && req.method === 'GET') {
-      const id = u.pathname.split('/').pop(); if (!safeId(id)) return send(res, 400, { error: 'Invalid project ID' });
-      try { return send(res, 200, { project: JSON.parse(await readFile(path.join(storage, `${id}.json`), 'utf8')) }); }
-      catch (e) { if (e.code === 'ENOENT') return send(res, 404, { error: 'Project not found' }); throw e; }
-    }
-    if (u.pathname === '/api/projects' && req.method === 'POST') {
-      const p = await body(req, 90_000_000);
-      if (typeof p.topic !== 'string' || !Array.isArray(p.slides) || p.slides.length !== 5) return send(res, 400, { error: 'A topic and exactly five slides are required.' });
-      if (p.id && !safeId(p.id)) return send(res, 400, { error: 'Invalid project ID.' });
-      const id = p.id || crypto.randomUUID(); const updatedAt = new Date().toISOString();
-      const project = { ...p, id, updatedAt };
-      await writeFile(path.join(storage, `${id}.json`), JSON.stringify(project));
-      return send(res, 200, { id, updatedAt });
-    }
-    if (u.pathname.startsWith('/api/projects/') && req.method === 'DELETE') {
-      const id = u.pathname.split('/').pop(); if (!safeId(id)) return send(res, 400, { error: 'Invalid project ID' });
-      await fs.promises.rm(path.join(storage, `${id}.json`), { force: true }); return send(res, 200, { ok: true });
-    }
-    if (u.pathname === '/api/draft' && req.method === 'POST') {
-      const data = await body(req, 70_000);
-      if (!String(data.topic || '').trim()) return send(res, 400, { error: 'Enter a topic before generating copy.' });
-      const clinic = { name: String(data.clinic?.name || '').slice(0, 80), phone: String(data.clinic?.phone || '').slice(0, 40) };
-      return send(res, 200, { draft: await withProviderSlot(String(data.provider || 'codex').slice(0, 30), () => runTextProvider('draft', { topic: String(data.topic).slice(0, 450), notes: String(data.notes || '').slice(0, 2000), language: 'Malayalam-English mix', clinic, provider: String(data.provider || 'codex').slice(0, 30), model: String(data.model || '').slice(0, 100), workDir: path.join(root, 'storage'), outputName: 'carousel-draft' }), 'text') });
-    }
-    if (u.pathname === '/api/revise' && req.method === 'POST') {
-      const data = await body(req, 80_000);
-      if (!data.slide?.heading || !String(data.correction || '').trim()) return send(res, 400, { error: 'A slide and correction are required.' });
-      const clinic = { name: String(data.clinic?.name || '').slice(0, 80), phone: String(data.clinic?.phone || '').slice(0, 40) };
-      return send(res, 200, { slide: await withProviderSlot(String(data.provider || 'codex').slice(0, 30), () => runTextProvider('revise', { topic: String(data.topic).slice(0, 450), slide: data.slide, correction: String(data.correction).slice(0, 1800), role: data.slide.role, clinic, provider: String(data.provider || 'codex').slice(0, 30), model: String(data.model || '').slice(0, 100), workDir: path.join(root, 'storage'), outputName: `slide-${String(data.slide.id || 'revision').slice(0, 30)}` }), 'text') });
-    }
-    if (u.pathname === '/api/render-slide' && req.method === 'POST') {
-      const data = await body(req, 30_000_000);
-      return send(res, 200, { image: await withProviderSlot(data.provider, () => generateSlideImage({ ...data, workDir: path.join(root, 'storage') })) });
-    }
-    if (req.method !== 'GET' && req.method !== 'HEAD') return send(res, 405, { error: 'Method not allowed.' });
-    let file = path.resolve(site, `.${decodeURIComponent(u.pathname === '/' ? '/index.html' : u.pathname)}`);
-    if (!(file === site || file.startsWith(site + path.sep))) return send(res, 403, { error: 'Forbidden.' });
-    if (!path.extname(file)) file = path.join(file, 'index.html');
-    let stat; try { stat = await fs.promises.stat(file); } catch { return send(res, 404, { error: 'Not found.' }); }
-    if (!stat.isFile()) return send(res, 404, { error: 'Not found.' });
-    res.writeHead(200, { 'Content-Type': mime[path.extname(file)] || 'application/octet-stream', 'X-Content-Type-Options': 'nosniff' }); fs.createReadStream(file).pipe(res);
-  } catch (e) { if (!res.headersSent) send(res, e.status || 500, { error: e.message || 'Unexpected error.' }); }
-});
-server.listen(port, host, () => console.log(`SmileCraft Carousel Studio: http://${host}:${port}`));
+    if(ref?.staticPath){const file=path.resolve(site,`.${ref.staticPath}`);if(!(file.startsWith(site+path.sep)))throw Object.assign(new Error('Invalid built-in template path.'),{status:409});const bytes=await readFile(file);return {referenceImage:dataUrl(bytes,'image/png'),masterReferenceImage:''};}
+    const asset=getAsset(clientId,ref?.assetId);
+    if(!asset) throw Object.assign(new Error('Template reference asset is missing.'),{status:409});
+    return {referenceImage:dataUrl(await readFile(asset.path),asset.mime),masterReferenceImage:''};
+  }
+  let master,masterMime;if(template.data.staticPath){const file=path.resolve(site,`.${template.data.staticPath}`);if(!(file.startsWith(site+path.sep)))throw Object.assign(new Error('Invalid built-in template path.'),{status:409});master=await readFile(file);masterMime=path.extname(file).toLowerCase()==='.jpg'?'image/jpeg':'image/png'}else{const asset=getAsset(clientId,template.data.assetId);if(!asset)throw Object.assign(new Error('Master template asset is missing.'),{status:409});master=await readFile(asset.path);masterMime=asset.mime}const full=dataUrl(master,masterMime),crop=template.data.crops?.[slideIndex];
+  try{const {default:sharp}=await import('sharp');const meta=await sharp(master).metadata();let left=0,top=0,width=meta.width,height=meta.height;if(crop?.width&&crop?.height){left=Math.round(crop.x*meta.width);top=Math.round(crop.y*meta.height);width=Math.round(crop.width*meta.width);height=Math.round(crop.height*meta.height)}else if(crop?.top!=null){const panel=(1-crop.left-crop.right-crop.gap*4)/5;left=Math.round((crop.left+slideIndex*(panel+crop.gap))*meta.width);top=Math.round(crop.top*meta.height);width=Math.round(panel*meta.width);height=Math.round((crop.bottom-crop.top)*meta.height)}const clipped=await sharp(master).extract({left:Math.max(0,left),top:Math.max(0,top),width:Math.max(1,Math.min(width,meta.width-left)),height:Math.max(1,Math.min(height,meta.height-top))}).png().toBuffer();return{referenceImage:dataUrl(clipped,'image/png'),masterReferenceImage:full}}catch{return{referenceImage:full,masterReferenceImage:full}}
+}
+async function runScopedJob(clientId,projectId,data){const project=getProject(clientId,projectId);if(!project)throw Object.assign(new Error('Project not found.'),{status:404});const stage=String(data.stage||''),provider=String(data.provider||project.generation?.writingProvider||'codex'),model=String(data.model||'').slice(0,100),slideIndex=Number.isInteger(data.slideIndex)?data.slideIndex:null,input={projectRevision:project.revision,contextSnapshot:project.contextSnapshot,topic:project.topic,notes:project.notes,slideIndex,correction:String(data.correction||'').slice(0,1800)},inputHash=hash(input),job=createJob({clientId,projectId,slideIndex,stage,provider,model,inputHash,input,idempotencyKey:String(data.idempotencyKey||'').slice(0,120)});if(job.status!=='queued')return{job,duplicate:true};startJob(job.id);try{if(stage==='draft'){const draft=await withProviderSlot(provider,()=>runTextProvider('draft',{topic:project.topic,notes:project.notes,contextSnapshot:project.contextSnapshot,provider,model,workDir:storageRoot,outputName:`${projectId}-draft`}), 'text');const fresh=getProject(clientId,projectId);if(fresh.revision!==project.revision){finishJob(job.id,'superseded',draft);return{job:{...job,status:'superseded'},draft,superseded:true}}const saved=saveProject(clientId,projectId,{expectedRevision:project.revision,slides:draft.slides,instagram:draft.instagram,youtubeTitle:draft.youtubeTitle,youtubeDescription:draft.youtubeDescription,stage:1});finishJob(job.id,'succeeded',{revision:saved.revision});return{job:{...job,status:'succeeded'},project:saved}}
+if(stage==='revise'){if(slideIndex==null||slideIndex<0||slideIndex>4)throw Object.assign(new Error('slideIndex 0–4 is required.'),{status:400});const revised=await withProviderSlot(provider,()=>runTextProvider('revise',{topic:project.topic,slide:project.slides[slideIndex],correction:data.correction,contextSnapshot:project.contextSnapshot,provider,model,workDir:storageRoot,outputName:`${projectId}-slide-${slideIndex+1}`}), 'text');const fresh=getProject(clientId,projectId);if(fresh.revision!==project.revision){finishJob(job.id,'superseded',revised);return{job:{...job,status:'superseded'},slide:revised,superseded:true}}const slides=project.slides.map((s,i)=>i===slideIndex?{...s,...revised}:s),saved=saveProject(clientId,projectId,{expectedRevision:project.revision,slides});finishJob(job.id,'succeeded',{revision:saved.revision});return{job:{...job,status:'succeeded'},project:saved}}
+if(stage==='image'){if(slideIndex==null||slideIndex<0||slideIndex>4)throw Object.assign(new Error('slideIndex 0–4 is required.'),{status:400});const slide=project.slides[slideIndex];if(!slide.approved)throw Object.assign(new Error('Approve this slide before generating artwork.'),{status:400});const refs=await referenceFor(clientId,project.templateId,slideIndex),logoAsset=project.contextSnapshot.brand?.logoAssetId?getAsset(clientId,project.contextSnapshot.brand.logoAssetId):null,logoImage=logoAsset?dataUrl(await readFile(logoAsset.path),logoAsset.mime):'';const image=await withProviderSlot(String(data.provider||project.generation?.provider||'openai'),()=>generateSlideImage({provider:String(data.provider||project.generation?.provider||'openai'),model:String(data.model||project.generation?.model||''),slide,slideNumber:slideIndex+1,contextSnapshot:project.contextSnapshot,brand:project.contextSnapshot.brand,logoImage,...refs,workDir:storageRoot}));const parsed=parseDataUrl(image),asset=await storeAsset(clientId,{projectId,kind:'generated-artwork',name:`slide-${slideIndex+1}.png`,mime:parsed.mime,bytes:parsed.bytes}),saved=attachArtworkIfCurrent(clientId,projectId,{slideIndex,copyRevision:slide.copyRevision,templateId:project.templateId,contextHash:hash(project.contextSnapshot),assetId:asset.id,provider:String(data.provider||project.generation?.provider||'')});if(!saved){finishJob(job.id,'superseded',{assetId:asset.id});return{job:{...job,status:'superseded'},superseded:true,assetId:asset.id}}finishJob(job.id,'succeeded',{assetId:asset.id,revision:saved.revision});return{job:{...job,status:'succeeded'},project:saved,assetId:asset.id}}
+throw Object.assign(new Error('Unknown job stage.'),{status:400})}catch(e){finishJob(job.id,'failed',null,e.message);throw e}}
+
+const server=http.createServer(async(req,res)=>{const u=new URL(req.url||'/',`http://${host}`),parts=routeParts(u.pathname);try{
+if(u.pathname==='/api/status'&&req.method==='GET'){const textProviders=textProviderStatus(codexCli.installed,antigravityCli.installed,codexCli.authenticated),imageProviders=imageProviderStatus(codexCli.installed&&codexCli.authenticated,antigravityCli.installed);return send(res,200,{codexAvailable:codexCli.installed,codexAuthenticated:codexCli.authenticated,cli:{codex:codexCli,antigravity:antigravityCli},textProviders,imageProviders,providerConcurrency,textConcurrency,storageRoot,localOnly:['127.0.0.1','localhost'].includes(host)})}
+if(u.pathname==='/api/generation-activity'&&req.method==='GET')return send(res,200,{image:providerActivity('image'),text:providerActivity('text')});
+if(u.pathname==='/api/models/agy'&&req.method==='GET'){if(!antigravityCli.installed)return send(res,409,{error:'Antigravity CLI (agy) is not installed or is not on PATH.'});return send(res,200,{models:await availableAgyModels(process.env.AGY_BIN||'agy')})}
+if(u.pathname==='/api/business-packs'&&req.method==='GET')return send(res,200,{packs:publicBusinessPacks()});
+if(u.pathname==='/api/template-pack-example.zip'&&req.method==='GET'){const bytes=Buffer.from('UEsDBBQAAAAIAMmbOF1UvTBS8gAAANACAAAJAAAAcGFjay5qc29ulZDNbsIwEITveQrLZxIlkFy4orZ3WnGpcjDJklqKf5Q1iArx7jibYiKqCOVieWdmP498iRjjWP2AEjvoUBrN1yxb9Kqs/ZU3oKETbQxnoWwLnKxTiPIsSZN0ULVQ0Esfwwp7G6/sjyg1IH79WkCf+vYiC3jup5JyDvyOcKPMhc5Q6CBPEGMra4g7OEAHuhqeoMy9w7tPsc8+xbb/U8rUlCIMPnSaN+aonXeLIAu0ULmtcNL0W/m6eFp5lB0XJt8alG70rcGQSjRUIs0SqxsevOviJWk5QVrOJq0mSKvZpHyClM8mFROk4on0dyuj+1RG1xtQSwMEFAAAAAgAyZs4XSq5lH4/AAAARAAAAAYAAAAwMS5wbmfrDPBz5+WS4mJgYOD19HAJAtKMIMzBAiS3yvAwASluTxfHkIpbyX/+yzMwvWb82h95XxIozODp6ueyzimhCQBQSwMEFAAAAAgAyZs4XSq5lH4/AAAARAAAAAYAAAAwMi5wbmfrDPBz5+WS4mJgYOD19HAJAtKMIMzBAiS3yvAwASluTxfHkIpbyX/+yzMwvWb82h95XxIozODp6ueyzimhCQBQSwMEFAAAAAgAyZs4XSq5lH4/AAAARAAAAAYAAAAwMy5wbmfrDPBz5+WS4mJgYOD19HAJAtKMIMzBAiS3yvAwASluTxfHkIpbyX/+yzMwvWb82h95XxIozODp6ueyzimhCQBQSwMEFAAAAAgAyZs4XSq5lH4/AAAARAAAAAYAAAAwNC5wbmfrDPBz5+WS4mJgYOD19HAJAtKMIMzBAiS3yvAwASluTxfHkIpbyX/+yzMwvWb82h95XxIozODp6ueyzimhCQBQSwMEFAAAAAgAyZs4XSq5lH4/AAAARAAAAAYAAAAwNS5wbmfrDPBz5+WS4mJgYOD19HAJAtKMIMzBAiS3yvAwASluTxfHkIpbyX/+yzMwvWb82h95XxIozODp6ueyzimhCQBQSwECFAMUAAAACADJmzhdVL0wUvIAAADQAgAACQAAAAAAAAAAAAAAgAEAAAAAcGFjay5qc29uUEsBAhQDFAAAAAgAyZs4XSq5lH4/AAAARAAAAAYAAAAAAAAAAAAAAIABGQEAADAxLnBuZ1BLAQIUAxQAAAAIAMmbOF0quZR+PwAAAEQAAAAGAAAAAAAAAAAAAACAAXwBAAAwMi5wbmdQSwECFAMUAAAACADJmzhdKrmUfj8AAABEAAAABgAAAAAAAAAAAAAAgAHfAQAAMDMucG5nUEsBAhQDFAAAAAgAyZs4XSq5lH4/AAAARAAAAAYAAAAAAAAAAAAAAIABQgIAADA0LnBuZ1BLAQIUAxQAAAAIAMmbOF0quZR+PwAAAEQAAAAGAAAAAAAAAAAAAACAAaUCAAAwNS5wbmdQSwUGAAAAAAYABgA7AQAACAMAAAAA','base64');res.writeHead(200,{'Content-Type':'application/zip','Content-Disposition':'attachment; filename="template-pack-example.zip"','Cache-Control':'public, max-age=3600'});return res.end(bytes)}
+if(u.pathname==='/api/dashboard'&&req.method==='GET')return send(res,200,dashboard());
+if(u.pathname==='/api/all-projects'&&req.method==='GET')return send(res,200,{projects:listProjects().map(p=>({...p,clientName:getClient(p.clientId)?.name||'Unknown client'}))});
+if(u.pathname==='/api/templates/shared'&&req.method==='GET')return send(res,200,{templates:listSharedTemplates()});
+if(u.pathname==='/api/clients'&&req.method==='GET')return send(res,200,{clients:listClients()});
+if(u.pathname==='/api/clients'&&req.method==='POST')return send(res,201,{client:createClient(await body(req,200_000))});
+if(parts[0]==='api'&&parts[1]==='clients'&&parts.length===3&&req.method==='GET'){const c=getClient(parts[2]);return c?send(res,200,{client:c}):send(res,404,{error:'Client not found.'})}
+if(parts[0]==='api'&&parts[1]==='clients'&&parts.length===3&&req.method==='PATCH')return send(res,200,{client:updateClient(parts[2],await body(req,500_000))});
+if(parts[0]==='api'&&parts[1]==='clients'&&parts[3]==='projects'&&parts.length===4&&req.method==='GET')return send(res,200,{projects:listProjects(parts[2])});
+if(parts[0]==='api'&&parts[1]==='clients'&&parts[3]==='projects'&&parts.length===4&&req.method==='POST')return send(res,201,{project:createProject(parts[2],await body(req,2_000_000))});
+if(parts[0]==='api'&&parts[1]==='clients'&&parts[3]==='import-project'&&parts.length===4&&req.method==='POST')return send(res,201,{project:await importPortableProject(parts[2],await body(req,90_000_000))});
+if(parts[0]==='api'&&parts[1]==='clients'&&parts[3]==='projects'&&parts.length===5&&req.method==='GET'){const p=getProject(parts[2],parts[4]);return p?send(res,200,{project:p}):send(res,404,{error:'Project not found.'})}
+if(parts[0]==='api'&&parts[1]==='clients'&&parts[3]==='projects'&&parts.length===5&&req.method==='PATCH')return send(res,200,{project:saveProject(parts[2],parts[4],await body(req,8_000_000))});
+if(parts[0]==='api'&&parts[1]==='clients'&&parts[3]==='projects'&&parts[5]==='apply-client-settings'&&req.method==='POST'){const d=await body(req);return send(res,200,{project:applyLatestClientSettings(parts[2],parts[4],d.expectedRevision)})}
+if(parts[0]==='api'&&parts[1]==='clients'&&parts[3]==='projects'&&parts[5]==='jobs'&&req.method==='POST')return send(res,200,await runScopedJob(parts[2],parts[4],await body(req,2_000_000)));
+if(parts[0]==='api'&&parts[1]==='clients'&&parts[3]==='projects'&&parts[5]==='jobs'&&req.method==='GET')return send(res,200,{jobs:listJobs(parts[2],parts[4])});
+if(parts[0]==='api'&&parts[1]==='clients'&&parts[3]==='templates'&&req.method==='GET'){const c=getClient(parts[2]);if(!c)return send(res,404,{error:'Client not found.'});return send(res,200,{templates:listTemplates(c.id,c.businessPackId)})}
+if(parts[0]==='api'&&parts[1]==='clients'&&parts[3]==='assets'&&parts.length===5&&req.method==='GET'){const a=getAsset(parts[2],parts[4]);if(!a)return send(res,404,{error:'Asset not found.'});res.writeHead(200,{'Content-Type':a.mime,'Cache-Control':'private, max-age=3600','X-Content-Type-Options':'nosniff'});return fs.createReadStream(a.path).pipe(res)}
+if(parts[0]==='api'&&parts[1]==='clients'&&parts[3]==='assets'&&parts.length===4&&req.method==='POST'){const d=await body(req,25_000_000),p=parseDataUrl(d.image);return send(res,201,{asset:await storeAsset(parts[2],{projectId:d.projectId,kind:d.kind||'upload',name:d.name||'upload',mime:p.mime,bytes:p.bytes})})}
+if(u.pathname==='/api/template-imports'&&req.method==='POST'){let clientId=String(u.searchParams.get('clientId')||''),scope=String(u.searchParams.get('scope')||'client'),businessPackId=String(u.searchParams.get('businessPackId')||getClient(clientId)?.businessPackId||'');if(scope==='shared')clientId=null;return send(res,201,await stageTemplateImport({clientId,businessPackId,scope,bytes:await bodyBuffer(req)}))}
+if(parts[0]==='api'&&parts[1]==='template-imports'&&parts.length===3&&req.method==='PATCH')return send(res,200,{preview:updateTemplateImport(parts[2],await body(req,2_000_000))});
+if(parts[0]==='api'&&parts[1]==='template-imports'&&parts[3]==='install'&&req.method==='POST')return send(res,200,await installTemplateImport(parts[2]));
+if(u.pathname==='/api/migration/report'&&req.method==='GET')return send(res,200,migrationReport());
+if(u.pathname==='/api/migration/apply'&&req.method==='POST')return send(res,200,await migrateLegacy());
+
+// Legacy compatibility endpoints remain limited to legacy flat-file projects.
+if(u.pathname==='/api/projects'&&req.method==='GET'){const items=[];for(const f of await readdir(legacyStorage))if(f.endsWith('.json'))try{const p=JSON.parse(await readFile(path.join(legacyStorage,f),'utf8'));items.push({id:p.id,topic:p.topic,updatedAt:p.updatedAt,template:p.template,approved:p.slides?.filter(s=>s.approved).length||0,count:p.slides?.length||0})}catch{}return send(res,200,{projects:items})}
+if(u.pathname==='/api/projects'&&req.method==='POST'){const p=await body(req,90_000_000);if(typeof p.topic!=='string'||!Array.isArray(p.slides)||p.slides.length!==5)return send(res,400,{error:'A topic and exactly five slides are required.'});const legacyId=p.id||crypto.randomUUID();if(!safeId(legacyId))return send(res,400,{error:'Invalid project ID.'});const updatedAt=new Date().toISOString();await writeFile(path.join(legacyStorage,`${legacyId}.json`),JSON.stringify({...p,id:legacyId,updatedAt}));return send(res,200,{id:legacyId,updatedAt})}
+if(parts[0]==='api'&&parts[1]==='projects'&&parts.length===3&&req.method==='GET'){if(!safeId(parts[2]))return send(res,400,{error:'Invalid project ID'});try{return send(res,200,{project:JSON.parse(await readFile(path.join(legacyStorage,`${parts[2]}.json`),'utf8'))})}catch(e){if(e.code==='ENOENT')return send(res,404,{error:'Project not found'});throw e}}
+if(parts[0]==='api'&&parts[1]==='projects'&&parts.length===3&&req.method==='DELETE'){if(!safeId(parts[2]))return send(res,400,{error:'Invalid project ID'});await fs.promises.rm(path.join(legacyStorage,`${parts[2]}.json`),{force:true});return send(res,200,{ok:true})}
+if(u.pathname==='/api/template-pack'&&req.method==='GET')return send(res,200,{installed:[...legacyTemplateIds],logoInstalled:fs.existsSync(path.join(site,'assets','design-systems','clinic-logo.jpg'))});
+if(u.pathname==='/api/template-pack'&&req.method==='POST'){const d=await body(req,12_000_000);if(d.id!=='clinic-logo'&&!legacyTemplateIds.has(String(d.id||'')))return send(res,400,{error:'Unknown template pack image.'});return send(res,200,{ok:true,id:d.id,existing:true})}
+if(u.pathname==='/api/draft'&&req.method==='POST'){const d=await body(req,100_000);if(!String(d.topic||'').trim())return send(res,400,{error:'Enter a topic before generating copy.'});return send(res,200,{draft:await withProviderSlot(String(d.provider||'codex'),()=>runTextProvider('draft',{topic:String(d.topic).slice(0,450),notes:String(d.notes||'').slice(0,2000),clinic:{name:String(d.clinic?.name||'').slice(0,80),phone:String(d.clinic?.phone||'').slice(0,40)},provider:String(d.provider||'codex'),model:String(d.model||''),workDir:storageRoot,outputName:'carousel-draft'}),'text')})}
+if(u.pathname==='/api/revise'&&req.method==='POST'){const d=await body(req,100_000);return send(res,200,{slide:await withProviderSlot(String(d.provider||'codex'),()=>runTextProvider('revise',{topic:d.topic,slide:d.slide,correction:d.correction,clinic:d.clinic,provider:d.provider||'codex',model:d.model||'',workDir:storageRoot,outputName:'slide-revision'}),'text')})}
+if(u.pathname==='/api/render-slide'&&req.method==='POST'){const d=await body(req,35_000_000);return send(res,200,{image:await withProviderSlot(String(d.provider||'openai'),()=>generateSlideImage({...d,workDir:storageRoot}))})}
+
+if(req.method!=='GET'&&req.method!=='HEAD')return send(res,405,{error:'Method not allowed.'});let file=path.resolve(site,`.${decodeURIComponent(u.pathname==='/'?'/index.html':u.pathname)}`);if(!(file===site||file.startsWith(site+path.sep)))return send(res,403,{error:'Forbidden.'});if(!path.extname(file))file=path.join(file,'index.html');let st;try{st=await fs.promises.stat(file)}catch{return send(res,404,{error:'Not found.'})}if(!st.isFile())return send(res,404,{error:'Not found.'});res.writeHead(200,{'Content-Type':mime[path.extname(file)]||'application/octet-stream','X-Content-Type-Options':'nosniff'});fs.createReadStream(file).pipe(res)
+}catch(e){if(!res.headersSent)send(res,e.status||500,{error:e.message||'Unexpected error.',currentRevision:e.currentRevision})}});
+server.listen(port,host,()=>console.log(`Carousel Studio: http://${host}:${port}`));

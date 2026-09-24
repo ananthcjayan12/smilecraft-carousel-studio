@@ -1,106 +1,72 @@
-# SmileCraft Carousel Studio
+# Carousel Studio — multi-business local agency workspace
 
-A working **local-first, dependency-free Node.js carousel builder** for SmileCraft Dental Clinic. It follows the workflow: idea → AI-written (or editable starter) copy → per-slide corrections and approval → visual reference and image-provider selection → generated final artwork → review → individual PNGs + captions + editable JSON in a ZIP. Reference cards are supplied to the selected model as visual guidance; the app does not compose final carousel designs from deterministic Canvas templates.
+This branch implements the multi-business design in `docs/MULTI-BUSINESS-DESIGN.md` and `docs/MULTI-BUSINESS-IMPLEMENTATION-PLAN.md` while preserving the existing SmileCraft dental workflow and provider adapters.
 
-![Dashboard](docs/01-dashboard.png)
+## What changed
 
-## Quick start
+Carousel Studio now manages multiple isolated clients instead of treating one clinic brand as global state. The first release includes five business packs: **Dental, Tour Operator, Salon, Construction, and General Business**. Each pack owns its roles, starter topics, CTA policy, onboarding fields, factual restrictions and reviewer checklist.
 
-1. **Install Node.js 20 or newer** if not already installed. Extract the ZIP **with hidden files intact**; the `.git/` folder is part of the project.
-2. Open a terminal in `smilecraft-carousel-studio` (the folder with `package.json`).
-3. Run `npm start` (or `node server/index.mjs`). **No `npm install` is required:** the app has no third-party JavaScript dependencies.
-4. Open **http://127.0.0.1:4178** in a recent Chrome, Edge, Safari or Firefox browser.
-5. Select **Create Carousel** → enter a topic or choose a suggested one → choose **Generate slide copy** with Codex CLI, or **Start with editable sample** without Codex → edit and approve all five slides → choose a visual reference and image provider → generate and verify all five final images → Review → Export.
+Projects pin a serialized client/business context snapshot. Updating a client does not silently rewrite existing projects; use **Apply latest client settings** inside a project when you intentionally want to refresh that snapshot.
 
-To use another port, set `PORT=4200` in your terminal environment. By default the server binds to `127.0.0.1`, not the public Internet.
+Template references can be client-private or shared. The ZIP importer accepts STORE or DEFLATE archives, optional `pack.json`, exactly-five-image archives, legacy SmileCraft master boards, staged mapping, versions and safety limits. See `docs/PACKING-GUIDE.md` or download the guide/example archive from Shared Templates in the app.
 
-## Copy-generation providers
+## Install and run
 
-**The browser never stores or asks for your Codex login.** Install Codex CLI on the computer where `npm start` runs and authenticate it in your normal terminal. For example, with Node/npm installed:
+Requirements: Node.js 20 or newer.
 
 ```sh
-npm install -g @openai/codex
-codex login
-codex --version
+npm install
 npm start
 ```
 
-Follow the login prompts and confirm CLI access with a simple `codex exec` command in that same terminal environment. The server runs `codex exec` in a temporary, empty working directory using `--sandbox read-only`, `--ephemeral` and `--output-last-message`, then parses/validates its JSON output. The AI drafts **naturally mixed Malayalam-English copy and English visual prompts**: Malayalam words stay in Malayalam script, while English words and dental terms stay in Latin script. It also supports **one-slide revisions from your correction text**. Set the exact clinic name and optional phone number under **Clinic Settings** before generating; those values are passed to drafting/revision and used in slide/caption branding, and a missing phone number is never invented. All AI-generated copy is **unapproved** until you explicitly approve it. If the CLI is not installed or cannot authenticate, the app shows the actual error; you can still use an editable starter and finish the project without Codex. Set `CODEX_BIN` if your executable is named or located differently.
+Open `http://127.0.0.1:4178`.
 
-For copy generation and rewrites, choose **Codex CLI, OpenAI API, Gemini API, Antigravity (`agy`), or Claude API** directly in the Topic or Content step. Set `OPENAI_API_KEY`, `GEMINI_API_KEY`, or `ANTHROPIC_API_KEY` for the respective API choices; `agy` and Codex use their local authenticated CLIs.
+The server binds to localhost by default. Do not expose this unauthenticated first release directly to a public network.
 
-**Important:** A ChatGPT/Codex login is not the same as an OpenAI API key. The app does not claim that using the CLI makes separately billed image generation free.
+### Storage
 
-## Ten AI-generated master design systems
-
-Each master is one high-resolution AI-generated five-slide board, not a Canvas or CSS recreation. Choose one in Design and it will guide all five pages. Generation receives both the full board and an enlarged crop of the corresponding slide. Slides 1–4 remain informational with logo only; slide 5 alone has an appointment call-to-action, phone and location.
-
-All ten original high-resolution design boards and the clinic logo are checked into `web/assets/design-systems/`. They are available automatically in Design after updating this branch; they do not need to be uploaded or installed again for new projects. Clinic Settings → Master Template Library also supports re-importing an updated pack if you later replace the artwork.
-
-Clinic branding defaults to Dr. Pooja's Smile Craft Dental Clinic, phone 7907006842 and Sreenarayanapuram, Ezhupunna. The checked-in clinic logo is available as an image reference; you can also upload a different clinic logo in Clinic Settings. Settings remain editable.
-
-### Parallel image runners
-
-**Image stage (four providers):** Generate missing slides launches up to five independent requests simultaneously for OpenAI API, Gemini API, Codex CLI or Antigravity CLI. The UI shows how many jobs have started, are running, completed, and the actual peak concurrency. The server exposes live per-provider running/queued counts at `/api/generation-activity` and enforces its shared queue across overlapping projects. All four image providers default to five concurrent jobs, with optional `IMAGE_PARALLEL_OPENAI`, `IMAGE_PARALLEL_GEMINI`, `IMAGE_PARALLEL_CODEX`, and `IMAGE_PARALLEL_ANTIGRAVITY` process-environment overrides (integers 1–5).
-
-**Writing stage (five providers):** Codex CLI, OpenAI API, Gemini API, Antigravity CLI, and Claude API have independent `TEXT_PARALLEL_*` limits (default five, configurable 1–5). The initial draft is intentionally **one provider request containing all five coherent slide drafts and captions**, not five sequential calls. Individual rewrite requests can execute simultaneously across projects, subject to the shared writing queue. Running, queued, and configured capacities for both stages are visible at `/api/generation-activity`; advertised limits are also returned by `/api/status`.
-
-**Important:** Five is the maximum number of slide jobs in this application, not a provider-issued concurrency allowance. API account rate limits, usage tiers, and local CLI machine resources vary; lower the relevant environment cap if a provider throttles, returns errors, or the workstation runs out of memory. API image responses with 429 or 503 are retried with backoff. Running multiple paid image requests together can spend quota faster. Changes to environment limits require restarting the server.
-
-Always verify the final Malayalam-English text, exact clinic logo, clinical information and phone/location; image generation does not guarantee pixel-identical layouts or perfectly spelled text.
-
-## Final artwork providers
-
-The app includes template-reference images and accepts custom PNG/JPEG/WebP references. For every slide it sends the approved heading/body, visual direction, selected reference, exact clinic details, brand colors, and optional logo to one of these providers:
-
-- **OpenAI API:** set `OPENAI_API_KEY`; optional `OPENAI_IMAGE_MODEL` defaults to `gpt-image-2`, and `OPENAI_IMAGE_QUALITY` defaults to `high`.
-- **Gemini API:** set `GEMINI_API_KEY`; optional `GEMINI_IMAGE_MODEL` defaults to `gemini-3.1-flash-image`.
-- **Codex CLI (experimental):** install/authenticate Codex and ensure its `$imagegen` capability is available. The template and logo are attached with Codex's image-input option; generation runs in a temporary workspace and must produce `final-slide.png`. Set `CODEX_BIN` only when the executable is in a non-standard location.
-- **Antigravity CLI (`agy`):** install/authenticate `agy` and ensure its native `generate_image` tool is available. Artwork runs in an isolated temporary sandbox with headless tool approval enabled because `agy -p` cannot show interactive approval prompts. The app reads the signed-in account's live model list from `agy models`. Set `AGY_BIN` if the executable has a custom path; `AGY_IMAGE_TIMEOUT` defaults to `10m`.
-
-Example: `OPENAI_API_KEY='your-key' npm start` or `GEMINI_API_KEY='your-key' npm start`. API keys stay in the server environment and are not stored in the project/browser. API calls may incur provider charges. Codex and Antigravity use their own authenticated CLI quota and availability.
-
-Choose the **writing provider and model** in the Topic or Content step. In the Design step, choose the **image provider** and then one of that provider's supported image models; there are no free-text model fields.
-
-Claude API is available for copy and corrections. Claude supports image understanding but its API returns text rather than a generated raster image, so final slide rendering uses OpenAI, Gemini, Codex image generation, or Antigravity.
-
-Structured text calls follow the hardened provider handling used by the Video Cleaner project: schema-constrained Codex/AGY/Claude output, tool-free AGY prompting, provider-specific response validation, long-running timeouts, one AGY semantic retry, and diagnostic JSON under `storage/generation-logs/text/` when a provider fails.
-
-Generated artwork is stored per slide. Editing approved copy, changing the selected reference, or changing clinic branding invalidates affected artwork. Image models can still misspell text—especially Malayalam—so Review shows the approved source copy beside the generated image and export remains a human-reviewed step.
-
-## Files and exports
-
-Projects automatically save locally under `storage/projects/` (excluded from Git), plus a **Save** button. From **My Projects**, reopen, delete, or import the `project.json` exported in a previous ZIP. If you want to move the project to another computer, export/import the project JSON and the original image files as necessary. Each carousel ZIP contains:
-
-```text
-smilecraft_<topic>/
-  01.png ... 05.png       # FIVE separate complete 1080 × 1350 (4:5) PNG images
-  instagram_caption.txt   # editable Malayalam-English social copy
-  youtube_title.txt
-  youtube_description.txt
-  project.json            # editable/re-importable backup (optional)
-  README.txt
-```
-
-Social captions can be edited in the Export step. If you did not generate copy through Codex, the app composes a **draft** caption from your current slide text; review the text before posting. YouTube upload is not automated: export slides as a slideshow video in your preferred editor if you want a Short/video. The app does not upload to Instagram or YouTube.
-
-The selected image provider must be capable of rendering Malayalam glyphs. Even when glyphs render, image models can misspell or alter Malayalam and English text, so compare every generated slide against the approved copy before export.
-
-## Development, tests, and Git
-
-`npm test` runs the Node.js API smoke tests. `npm run dev` runs the backend with Node's watch mode. See `docs/01-dashboard.png` through `docs/05-export.png` for walkthrough screenshots and `docs/sample-export.zip` for a small sample output. The checked-in `.git` directory contains the initial local commit; verify with `git status` and `git log --oneline -1`. To publish **your own repository** if desired, add a new remote and push manually:
+Metadata is stored in SQLite and large images remain as files. By default both live under `storage/` (ignored by Git). To move storage elsewhere:
 
 ```sh
-git remote add origin https://github.com/YOUR-USERNAME/YOUR-REPOSITORY.git
-git push -u origin main
+STORAGE_ROOT=/absolute/path/to/carousel-storage npm start
 ```
 
-No GitHub remote or account access is preconfigured. Uploaded assets, generated projects and credentials remain on your computer unless you choose to export/publish them. Don't bind this unauthenticated local app to a public host/network. For cloud hosting, add authentication, safe storage, rate limits, security review and a compatible Codex execution/credential model first.
+Back up the entire storage root together: the SQLite database and asset files reference each other.
 
-## Known scope limitations
+## Agency workflow
 
-- Provider availability, quota, supported regions and image quality depend on the configured external service or locally authenticated CLI.
-- User-uploaded templates are **style references**, not layered editable files or a guarantee of pixel-identical output.
-- AI-generated typography must be checked against the approved source copy before publishing.
-- No MP4 rendering, automatic publishing, collaboration, or cloud syncing; the ZIP is designed to make manual posting simple.
-- Validate any medical information with a licensed dental professional before publishing.
+1. **Clients** → create a draft client with just a name and business type.
+2. Complete Brand & Business fields, language, exact contact details and logo when available.
+3. Templates & Assets → use the built-in neutral starter or import a private ZIP. Shared Templates can be installed explicitly by business type.
+4. Create a project. Its context snapshot is pinned to the current client profile.
+5. **Topic** → use an editable starter or generate one coherent five-slide draft.
+6. **Content** → edit/rewrite and approve each slide. Any text edit reopens approval and invalidates dependent artwork.
+7. **Design** → select a compatible template and image provider. Missing slide images can run concurrently through the shared provider queue.
+8. **Review** → explicitly mark each current generated artwork reviewed after comparing rendered text/identity/claims with the approved copy.
+9. **Export** → five separate 1080 × 1350 PNGs plus captions and portable `project.json`.
+
+Export is blocked until all five current copy approvals, artworks and artwork reviews are present.
+
+## Providers
+
+Writing: Codex CLI, OpenAI API, Gemini API, Antigravity CLI, Claude API.
+
+Images: OpenAI API, Gemini API, Codex CLI image generation, Antigravity CLI native image generation.
+
+Set keys/CLI paths through server environment variables; see `.env.example`. API keys are never stored in browser project data.
+
+## Legacy SmileCraft data
+
+Workspace Settings shows a dry-run legacy discovery report. **Back up & migrate** copies legacy project JSON to `storage/legacy-backup/` before creating new client/project records. Migration is idempotent through a source checksum ledger. Different stored clinic identities are not forced into the SmileCraft client. Existing data-URL artwork, logos and custom references are copied into managed assets. Legacy artwork is shown for review but is not automatically marked artwork-reviewed.
+
+The old flat-file `/api/projects`, `/api/draft`, `/api/revise`, `/api/render-slide`, and `/api/template-pack` behavior remains as a deliberate compatibility adapter.
+
+## Tests
+
+```sh
+npm test
+```
+
+The branch keeps the original provider/concurrency/server tests and adds `tests/multi-business.test.mjs` for pack isolation, business-neutral prompts, ZIP DEFLATE/traversal handling, SQLite revisions, cross-client access denial, stale writes and scoped HTTP behavior.
+
+See `docs/IMPLEMENTATION-LOG.md` for verification details.

@@ -1,0 +1,30 @@
+CAROUSEL STUDIO TEMPLATE ZIP GUIDE
+
+Option 1: Put exactly five PNG/JPEG/WebP files in a ZIP. The importer proposes filename order.
+Option 2: Add pack.json for stable IDs, versions, business types and mappings.
+
+Individual-slide manifest template:
+{
+  "schemaVersion": 1,
+  "id": "my-pack",
+  "version": "1.0.0",
+  "name": "My Pack",
+  "businessTypes": ["general"],
+  "templates": [{
+    "id": "five-slide-reference",
+    "name": "Five Slide Reference",
+    "mode": "slides",
+    "slideCount": 5,
+    "aspectRatio": "4:5",
+    "slides": [
+      {"position":1,"image":"01.png"},
+      {"position":2,"image":"02.png"},
+      {"position":3,"image":"03.png"},
+      {"position":4,"image":"04.png"},
+      {"position":5,"image":"05.png"}
+    ]
+  }]
+}
+
+Board mode uses one image and exactly five normalized {x,y,width,height} crops within 0..1.
+STORE and DEFLATE are supported. Unsafe paths, symlinks, encrypted entries and invalid images are rejected.

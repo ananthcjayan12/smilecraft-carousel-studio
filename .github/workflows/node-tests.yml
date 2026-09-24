@@ -1,16 +1,16 @@
-name: Node smoke tests
+name: Node tests
 on:
   pull_request:
-    branches: [main]
   push:
-    branches: [main]
+    branches: [main, v1.multi]
 jobs:
   test:
     runs-on: ubuntu-latest
-    timeout-minutes: 8
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
           node-version: "20"
+      - run: npm install --no-audit --no-fund
       - run: npm test
