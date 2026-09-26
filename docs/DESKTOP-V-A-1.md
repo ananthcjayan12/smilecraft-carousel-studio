@@ -40,3 +40,7 @@ Tauri's updater dependency is included but disabled in the default config until 
 ## Development
 
 The old Node server is retained for regression comparison and tests while v.a.1 is validated. The packaged desktop application does not launch or depend on Node.
+
+## macOS 26 compatibility note
+
+Tauri 2.11.x currently resolves to tao 0.35.3, which has an upstream Apple-Silicon startup-abort report on macOS 26 Tahoe. v.a.1 therefore pins Tauri 2.9.5 / the pre-tao-0.35 runtime until the upstream lifecycle issue is fixed. CI explicitly runs the macOS build on a macOS 26 ARM runner and launches the built app for a startup smoke test before publishing the DMG artifact.
