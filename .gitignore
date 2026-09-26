@@ -1,8 +1,21 @@
+# JavaScript dependencies and build output
 node_modules/
+dist/
+
+# Local configuration and application data
 .env
-.DS_Store
+.env.*
+!.env.example
 storage/
+
+# Logs and tooling artifacts
 *.log
 .playwright-cli/
 output/playwright/
-src-tauri/target/\n
+
+# OS files
+.DS_Store
+
+# Rust / Tauri generated build artifacts
+src-tauri/target/
+src-tauri/gen/schemas/
