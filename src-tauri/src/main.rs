@@ -221,7 +221,7 @@ async fn create_client(State(state): State<AppState>, Json(input): Json<Value>) 
     let client_id=id(); let ts=now();
     let profile=input.get("profile").cloned().unwrap_or_else(||json!({}));
     let mut brand=input.get("brand").cloned().unwrap_or_else(||json!({}));
-    if let Some(o)=brand.as_object_mut(){o.entry("name".into()).or_insert(json!(name));}
+    if let Some(o)=brand.as_object_mut(){o.entry("name").or_insert(json!(name));}
     {
         let db=state.db.lock().map_err(|_|ApiError::internal("Database lock failed"))?;
         db.execute("INSERT INTO clients VALUES(?1,?2,?3,1,0,?4,?5,?6,?6)",params![client_id,name,pack,json_text(&profile),json_text(&brand),ts]).map_err(|e|ApiError::internal(e.to_string()))?;
