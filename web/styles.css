@@ -675,3 +675,6 @@ header,
     min-width: 90px;
   }
 }
+
+/* v.a.1 desktop provider settings */
+.provider-key{display:grid;grid-template-columns:minmax(150px,1fr) minmax(220px,2fr) auto auto;gap:10px;align-items:center;padding:12px 0;border-bottom:1px solid #e6eeee}.provider-key>div{display:flex;flex-direction:column;gap:3px}.provider-key small,.provider small{color:#7b9197}.provider{display:flex;gap:10px;align-items:center;justify-content:space-between}@media(max-width:760px){.provider-key{grid-template-columns:1fr}.provider-key .btn{width:100%}}
