@@ -6,7 +6,7 @@ authors = ["Carousel Studio"]
 edition = "2021"
 
 [build-dependencies]
-tauri-build = { version = "=2.5.1", features = [] }
+tauri-build = { version = "=2.5.6", features = [] }
 
 [dependencies]
 tauri = { version = "=2.9.5", features = [] }
