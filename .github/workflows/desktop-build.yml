@@ -29,7 +29,7 @@ concurrency:
 jobs:
   macos:
     name: macOS universal DMG
-    runs-on: macos-latest
+    runs-on: macos-26
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
@@ -46,6 +46,24 @@ jobs:
       - run: npm install --no-audit --no-fund
       - name: Build universal DMG
         run: npm run desktop:build -- --target universal-apple-darwin --bundles dmg
+      - name: Launch smoke test on macOS 26
+        shell: bash
+        run: |
+          APP="$(find src-tauri/target -type d -name 'Carousel Studio.app' -print -quit)"
+          if [ -z "$APP" ]; then
+            echo "Built .app not found"
+            exit 1
+          fi
+          "$APP/Contents/MacOS/carousel-studio" >/tmp/carousel-studio.log 2>&1 &
+          PID=$!
+          sleep 8
+          if ! kill -0 "$PID" 2>/dev/null; then
+            echo "Carousel Studio exited during startup:"
+            cat /tmp/carousel-studio.log || true
+            exit 1
+          fi
+          kill "$PID" || true
+          wait "$PID" || true
       - uses: actions/upload-artifact@v4
         with:
           name: carousel-studio-macos-dmg
