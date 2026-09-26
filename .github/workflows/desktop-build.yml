@@ -44,6 +44,15 @@ jobs:
         with:
           workspaces: src-tauri
       - run: npm install --no-audit --no-fund
+      - name: Verify macOS runtime version
+        shell: bash
+        run: |
+          cargo tree --manifest-path src-tauri/Cargo.toml -i tao | tee /tmp/tao-tree.txt
+          grep -q "tao v0.34.5" /tmp/tao-tree.txt
+          if grep -q "tao v0.35.3" /tmp/tao-tree.txt; then
+            echo "Broken macOS 26 tao runtime resolved unexpectedly."
+            exit 1
+          fi
       - name: Build universal DMG
         run: npm run desktop:build -- --target universal-apple-darwin --bundles dmg
       - name: Launch smoke test on macOS 26
