@@ -6,11 +6,11 @@ authors = ["Carousel Studio"]
 edition = "2021"
 
 [build-dependencies]
-tauri-build = { version = "2", features = [] }
+tauri-build = { version = "=2.5.1", features = [] }
 
 [dependencies]
-tauri = { version = "2", features = [] }
-tauri-plugin-updater = "2"
+tauri = { version = "=2.9.5", features = [] }
+tauri-plugin-updater = "=2.9.0"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 axum = { version = "0.8", features = ["multipart"] }
@@ -34,4 +34,3 @@ strip = true
 lto = true
 codegen-units = 1
 opt-level = "s"
-panic = "abort"
