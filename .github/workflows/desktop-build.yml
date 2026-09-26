@@ -55,17 +55,30 @@ jobs:
           fi
       - name: Build universal DMG
         run: npm run desktop:build -- --target universal-apple-darwin --bundles dmg
-      - name: Launch smoke test on macOS 26
+      - name: Launch smoke test from packaged DMG on macOS 26
         shell: bash
         run: |
-          APP="$(find src-tauri/target -type d -name 'Carousel Studio.app' -print -quit)"
-          if [ -z "$APP" ]; then
-            echo "Built .app not found"
+          DMG="$(find src-tauri/target -type f -name '*.dmg' -print -quit)"
+          if [ -z "$DMG" ]; then
+            echo "Built DMG not found"
+            exit 1
+          fi
+          MOUNT_POINT="$(mktemp -d /tmp/carousel-studio-mount.XXXXXX)"
+          cleanup() {
+            hdiutil detach "$MOUNT_POINT" -quiet -force 2>/dev/null || true
+            rmdir "$MOUNT_POINT" 2>/dev/null || true
+          }
+          trap cleanup EXIT
+          hdiutil attach "$DMG" -nobrowse -readonly -mountpoint "$MOUNT_POINT"
+          APP="$MOUNT_POINT/Carousel Studio.app"
+          if [ ! -d "$APP" ]; then
+            echo "Carousel Studio.app not found inside DMG"
+            find "$MOUNT_POINT" -maxdepth 2 -print
             exit 1
           fi
           "$APP/Contents/MacOS/carousel-studio" >/tmp/carousel-studio.log 2>&1 &
           PID=$!
-          sleep 8
+          sleep 10
           if ! kill -0 "$PID" 2>/dev/null; then
             echo "Carousel Studio exited during startup:"
             cat /tmp/carousel-studio.log || true
@@ -73,6 +86,7 @@ jobs:
           fi
           kill "$PID" || true
           wait "$PID" || true
+          echo "Carousel Studio remained alive for the startup smoke-test window."
       - uses: actions/upload-artifact@v4
         with:
           name: carousel-studio-macos-dmg
