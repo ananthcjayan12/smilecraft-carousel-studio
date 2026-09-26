@@ -4,7 +4,7 @@ on:
   push:
     branches: [v.a.1]
     paths:
-      - ".va1-bootstrap/**"
+      - ".va1-bootstrap/READY"
 
 permissions:
   contents: write
@@ -20,7 +20,7 @@ jobs:
       - name: Expand desktop source payload
         shell: bash
         run: |
-          base64 -d .va1-bootstrap/payload.zip.b64 > /tmp/va1-desktop.zip
+          cat .va1-bootstrap/chunk-* | base64 -d > /tmp/va1-desktop.zip
           unzip -oq /tmp/va1-desktop.zip -d .
 
       - name: Commit generated desktop source
