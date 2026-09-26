@@ -63,7 +63,8 @@ Render all supplied text sharply and legibly. Malayalam words must remain Malaya
 
 export function buildSlideImagePrompt(data) {
   const {slide,slideNumber,contextSnapshot:c,masterReferenceImage,referenceContext}=data;
-  if(!c)return dentalSlideImagePrompt(data);
+  const correction=limit(data.correction,1800).trim();
+  if(!c)return dentalSlideImagePrompt(data)+(correction?`\n\nREGENERATION REQUEST: Apply this visual change while preserving all approved copy and brand rules: ${correction}`:'');
   const b=c.brand||{},final=Number(slideNumber)===5;
   return [
     'Create one FINAL publication-ready 4:5 portrait carousel slide '+slideNumber+' of 5 for '+c.businessPack.name+'.',
@@ -80,6 +81,7 @@ export function buildSlideImagePrompt(data) {
     'Render approved heading and body exactly. Do not translate, transliterate, rewrite, omit or add words. Preserve Malayalam script and English Latin script as supplied. Use safe margins, readable text and ample whitespace.',
     final?'Use only the client CTA: '+limit(c.cta?.text,120)+'. Include only supplied contact details.':'This is an informational slide. No sales CTA, phone, address or booking button.',
     'Visual concept: '+limit(slide?.visualPrompt,650),
+    correction?'REGENERATION REQUEST: Apply this visual change while preserving all approved copy and brand rules: '+correction:'',
     businessPromptContext(c,referenceContext,{stage:'image',slideNumber}),
     'No invented claims, testimonials, statistics, prices, QR codes, watermarks or extra logos. Output one complete flat slide, not a mockup.'
   ].join('\n');

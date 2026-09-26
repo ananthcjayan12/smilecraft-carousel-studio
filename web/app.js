@@ -1,106 +1,731 @@
-import { starterSlides } from './data.js';
-import { IMAGE_MODELS, WRITING_MODELS } from './provider-models.js';
-import { repairGeneration, generationControls, friendlyGenerationError } from './studio-controls.js';
-import { runConcurrent } from './batch-runner.js';
-import { makeZip, downloadBlob } from './zip.js';
-import { dataURLBlob } from './zip.js';
-import { DESIGN_SYSTEMS } from './design-systems.js';
-import { analyzeLogoColors } from './logo-colors.js';
-const root=document.querySelector('#app'),toastEl=document.querySelector('#toast'),e=v=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
-const state={agyModels:[],batch:null,generationError:'',view:'overview',packs:[],clients:[],dashboard:{},status:{},migration:{},allProjects:[],sharedTemplates:[],sharedPackId:'general',client:null,projects:[],templates:[],project:null,index:0,busy:'',toastTimer:null,saveTimer:null,importPreview:null,importId:'',correction:'',captionTab:'instagram',maker:{name:'',businessType:'',primary:'#073a42',accent:'#14ada9',language:'English',languageNotes:'',direction:'',provider:'openai',model:'gpt-image-2',logoImage:'',logoName:'',logoColorsAnalyzed:false,moodImage:'',moodName:'',results:[],progress:0,errors:[]}};
-async function api(url,data,method=data===undefined?'GET':'POST',raw=false){const opt={method,headers:{}};if(data!==undefined){if(raw){opt.body=data;opt.headers['Content-Type']='application/zip'}else{opt.body=JSON.stringify(data);opt.headers['Content-Type']='application/json'}}const r=await fetch(url,opt);const j=await r.json().catch(()=>({}));if(!r.ok)throw Object.assign(new Error(j.error||`Request failed (${r.status})`),{status:r.status,currentRevision:j.currentRevision});return j}
-function toast(m){toastEl.textContent=m;toastEl.classList.add('show');clearTimeout(state.toastTimer);state.toastTimer=setTimeout(()=>toastEl.classList.remove('show'),5000)}
-const pack=id=>state.packs.find(x=>x.id===id),activePack=()=>pack(state.client?.businessPackId||state.project?.businessPackId),slide=()=>state.project?.slides?.[state.index],approved=()=>state.project?.slides?.filter(x=>x.approved).length||0,artworks=()=>state.project?.slides?.filter(x=>x.artworkAssetId).length||0,reviews=()=>state.project?.slides?.filter(x=>x.artworkAssetId&&x.artworkReviewed).length||0;
-async function refreshAll(){const [packs,clients,dashboard,status,migration,allProjects,shared]=await Promise.all([api('/api/business-packs'),api('/api/clients'),api('/api/dashboard'),api('/api/status'),api('/api/migration/report'),api('/api/all-projects'),api('/api/templates/shared')]);state.packs=packs.packs;state.clients=clients.clients;state.dashboard=dashboard;state.status=status;state.migration=migration;state.allProjects=allProjects.projects;state.sharedTemplates=shared.templates;if(!status.imageProviders?.[state.maker.provider]?.available){const available=Object.entries(status.imageProviders||{}).find(([,v])=>v.available)?.[0];if(available){state.maker.provider=available;state.maker.model=IMAGE_MODELS[available]?.[0]?.[0]||''}}}
-async function selectClient(id){const [{client},projects,templates]=await Promise.all([api(`/api/clients/${id}`),api(`/api/clients/${id}/projects`),api(`/api/clients/${id}/templates`)]);state.client=client;state.clientTab='projects';state.generationError='';state.batch=null;state.projects=projects.projects;state.templates=templates.templates;state.view='client';state.project=null;render()}
-async function openProject(id){const {project}=await api(`/api/clients/${state.client.id}/projects/${id}`);state.project=project;state.generationError='';state.batch=null;state.index=0;state.view='studio';render()}
-function nav(){return `<aside class="side"><div class="logo"><span>◼</span><div class="wordmark">Carousel <span>Studio</span><small>Multi-business AI creator</small></div></div><nav><button class="navitem ${state.view==='overview'?'active':''}" data-action="nav" data-value="overview">⌂ Overview</button><button class="navitem ${state.view==='clients'||state.view==='client'?'active':''}" data-action="nav" data-value="clients">▣ Clients</button><button class="navitem ${state.view==='template-maker'?'active':''}" data-action="nav" data-value="template-maker">✦ Template Maker</button><button class="navitem ${state.view==='all-projects'?'active':''}" data-action="nav" data-value="all-projects">▧ All Projects</button><button class="navitem ${state.view==='shared'?'active':''}" data-action="nav" data-value="shared">▦ Shared Templates</button><button class="navitem ${state.view==='settings'?'active':''}" data-action="nav" data-value="settings">⚙ Workspace Settings</button></nav><div class="side-bottom"><strong>Local agency workspace</strong>Client identity, projects, templates and generation jobs stay isolated by server-owned IDs.</div></aside>`}
-
-function templateMakerPage(){const m=state.maker,models=IMAGE_MODELS[m.provider]||[];return `<div class="header-row"><div><span class="pill">AI design-system builder</span><h1 class="page-title" style="margin-top:10px">Turn one brand into 10 pro template directions</h1><p class="subtitle">The dental collection supplies design principles only. Every output is reinterpreted for this business, its identity and its audience.</p></div><span class="pill ${m.results.length===10?'green':''}">${m.results.length}/10 ready</span></div><div class="grid-side"><section class="card card-pad"><h2>Business creative brief</h2><div class="setting-grid"><div><label class="formlabel">Business name *</label><input class="control" data-maker="name" value="${e(m.name)}" placeholder="e.g. Coastline Tours"></div><div><label class="formlabel">Industry / business type *</label><input class="control" data-maker="businessType" value="${e(m.businessType)}" placeholder="e.g. Luxury tour operator"></div></div><div class="setting-grid"><div><label class="formlabel">Primary colour</label><input type="color" data-maker="primary" value="${e(m.primary)}"></div><div><label class="formlabel">Accent colour</label><input type="color" data-maker="accent" value="${e(m.accent)}"></div></div><label class="formlabel">Language mixing preference</label><select class="control" data-maker="language"><option ${m.language==='English'?'selected':''}>English</option><option ${m.language==='Malayalam + English'?'selected':''}>Malayalam + English</option><option ${m.language==='Hindi + English'?'selected':''}>Hindi + English</option><option ${m.language==='Arabic + English'?'selected':''}>Arabic + English</option><option ${m.language==='Custom mix'?'selected':''}>Custom mix</option></select><input class="control" style="margin-top:8px" data-maker="languageNotes" value="${e(m.languageNotes)}" placeholder="e.g. Headlines in Malayalam, details in English"><label class="formlabel">Creative direction</label><textarea class="control area" data-maker="direction" placeholder="Audience, mood, photography, things to avoid…">${e(m.direction)}</textarea><div class="setting-grid"><label class="file-upload"><input type="file" accept="image/png,image/jpeg,image/webp" data-file="maker-logo"><span>${m.logoName?'✓ '+e(m.logoName):'Upload exact logo *'}</span></label><label class="file-upload"><input type="file" accept="image/png,image/jpeg,image/webp" data-file="maker-mood"><span>${m.moodName?'✓ '+e(m.moodName):'Optional visual reference'}</span></label></div>${m.logoImage?`<div class="note logo-analysis"><div><b>${m.logoColorsAnalyzed?'Logo palette applied':'Use colors from your logo'}</b><br><span>${m.logoColorsAnalyzed?'Primary and accent fields now use the strongest distinct logo colors. You can still adjust them manually.':'We will ignore transparent, near-white and near-black background pixels.'}</span></div><div class="logo-color-actions"><span class="color-dot" style="background:${e(m.primary)}" title="Primary ${e(m.primary)}"></span><span class="color-dot" style="background:${e(m.accent)}" title="Accent ${e(m.accent)}"></span><button class="btn tiny" data-action="analyze-logo-colors">${m.logoColorsAnalyzed?'Re-analyze logo':'Analyze & apply colors'}</button></div></div>`:''}<div class="setting-grid"><div><label class="formlabel">Image provider</label><select class="control" data-maker="provider">${Object.entries(state.status.imageProviders||{}).map(([id,v])=>`<option value="${e(id)}" ${id===m.provider?'selected':''} ${v.available?'':'disabled'}>${e(v.label||id)}${v.available?'':' — unavailable'}</option>`).join('')}</select></div><div><label class="formlabel">Model</label><select class="control" data-maker="model">${models.map(([id,label])=>`<option value="${e(id)}" ${id===m.model?'selected':''}>${e(label)}</option>`).join('')}</select></div></div><div class="actions right"><button class="btn primary big" data-action="generate-template-system" ${state.busy?'disabled':''}>${state.busy?`Designing ${m.progress}/10…`:'✦ Build 10-template system'}</button></div>${m.errors.length?`<div class="note amber">${e(m.errors.join(' '))}</div>`:''}</section><aside class="card card-pad"><h2>The 10 inspiration lenses</h2><p class="subtitle">Each direction keeps the professional design logic while replacing dental content and identity with your business world.</p><div class="maker-lenses">${DESIGN_SYSTEMS.map((d,i)=>`<div class="maker-lens ${m.results.some(r=>r.id===d.id)?'done':''}"><img src="${e(d.img)}" alt=""><span><b>${i+1}. ${e(d.name)}</b><small>${e(d.kind)}</small></span></div>`).join('')}</div>${m.results.length===10?`<div class="actions"><button class="btn primary big" data-action="download-template-system">↓ Download template ZIP</button></div>`:''}</aside></div>`}
-function shell(content){const label=state.client?.name||'Agency workspace';return `<div class="shell">${nav()}<main class="main"><header class="topbar"><div class="crumb">Carousel Studio <span>/</span> <strong>${e(label)}</strong></div>${state.client?`<button class="userpill" data-action="client-home"><span class="avatar">${e(state.client.name.charAt(0).toUpperCase())}</span>${e(state.client.name)}</button>`:''}</header>${content}</main></div>`}
-function overview(){return `<div class="header-row"><div><h1 class="page-title">Agency overview</h1><p class="subtitle">Manage multiple businesses without sharing branding, templates or generation context.</p></div><button class="btn primary" data-action="nav" data-value="clients">＋ Add / manage clients</button></div><div class="metric-grid"><div class="metric"><b>${state.dashboard.clients||0}</b><span>Active clients</span></div><div class="metric"><b>${state.dashboard.projects||0}</b><span>Projects</span></div><div class="metric"><b>${state.dashboard.review||0}</b><span>Awaiting artwork review</span></div><div class="metric"><b>${state.dashboard.running||0}</b><span>Jobs running</span></div></div><div class="card card-pad"><h2>Clients</h2><div class="client-grid">${state.clients.length?state.clients.map(clientCard).join(''):`<div class="empty">No clients yet.</div>`}</div></div>`}
-function clientCard(c){const p=pack(c.businessPackId);return `<button class="client-card" data-action="open-client" data-id="${e(c.id)}"><span class="client-icon">${e(p?.icon||'◼')}</span><strong>${e(c.name)}</strong><small>${e(p?.name||c.businessPackId)}</small><span>Open workspace →</span></button>`}
-function clientsPage(){return `<div class="header-row"><div><h1 class="page-title">Clients</h1><p class="subtitle">Name and business type are enough to save a draft client; finish the profile later.</p></div></div><div class="grid-side"><section class="card card-pad"><h2>Add client</h2><label class="formlabel">Client / business name</label><input id="new-client-name" class="control" placeholder="e.g. Coastline Salon"><label class="formlabel">Business type</label><select id="new-client-pack" class="control">${state.packs.map(p=>`<option value="${e(p.id)}">${e(p.icon)} ${e(p.name)}</option>`).join('')}</select><div class="actions right"><button class="btn primary" data-action="create-client">Create client →</button></div></section><section class="card card-pad"><h2>Existing clients</h2><div class="client-list">${state.clients.length?state.clients.map(c=>`<button class="project-row" data-action="open-client" data-id="${e(c.id)}"><span class="project-emoji">${e(pack(c.businessPackId)?.icon||'◼')}</span><span class="rowinfo"><strong>${e(c.name)}</strong><small>${e(pack(c.businessPackId)?.name||'')}</small></span><span>Open →</span></button>`).join(''):`<div class="empty">No clients yet.</div>`}</div></section></div>`}
-function profileFields(){const p=activePack(),profile=state.client.profile||{},brand=state.client.brand||{};return `<div class="grid-side"><section class="card card-pad"><h2>Brand & business</h2><label class="formlabel">Business name</label><input class="control" data-client-brand="name" value="${e(brand.name||state.client.name)}"><div class="setting-grid"><div><label class="formlabel">Phone</label><input class="control" data-client-brand="phone" value="${e(brand.phone||'')}"></div><div><label class="formlabel">Location / service area</label><input class="control" data-client-brand="location" value="${e(brand.location||'')}"></div></div><div class="setting-grid"><div><label class="formlabel">Primary color</label><input type="color" data-client-brand="primary" value="${e(brand.primary||'#073a42')}"></div><div><label class="formlabel">Accent color</label><input type="color" data-client-brand="accent" value="${e(brand.accent||'#14ada9')}"></div></div><label class="formlabel">Language</label><select class="control" data-client-profile="language">${(p.languages||[]).map(x=>`<option value="${e(x.id)}" ${x.id===(profile.language||p.defaultLanguage)?'selected':''}>${e(x.label)}</option>`).join('')}</select>${(p.onboardingFields||[]).map(([key,label,type])=>`<label class="formlabel">${e(label)}</label>${type==='textarea'?`<textarea class="control area" data-client-profile="${e(key)}">${e(profile[key]||'')}</textarea>`:`<input class="control" data-client-profile="${e(key)}" value="${e(profile[key]||'')}">`}`).join('')}<label class="formlabel">Logo</label><label class="file-upload"><input type="file" accept="image/png,image/jpeg,image/webp" data-file="logo"><span>Upload exact client logo</span></label><div class="actions right"><button class="btn primary" data-action="save-client">Save profile</button></div></section><aside class="card card-pad"><h2>${e(p.name)}</h2><p class="subtitle">${e(p.description)}</p><div class="note" style="margin-top:16px"><b>Reviewer checklist</b><br>${(p.reviewerChecklist||[]).map(x=>`• ${e(x)}`).join('<br>')}</div></aside></div>`}
-function templateImageUrl(t,clientId=''){const ref=t.mode==='slides'?t.data?.slides?.[0]:t.data;if(ref?.staticPath)return ref.staticPath;if(!ref?.assetId)return'';return t.clientId===null?`/api/template-assets/${ref.assetId}`:`/api/clients/${clientId}/assets/${ref.assetId}`}
-function libraryTemplateCard(t,clientId=''){const src=templateImageUrl(t,clientId),scope=t.clientId===null?'Shared':'Private';return `<div class="template-card">${src?`<img src="${e(src)}" alt="${e(t.name)} reference board" loading="lazy" style="width:100%;height:210px;object-fit:contain;background:#eef7f7;border-radius:8px;display:block;margin-bottom:8px">`:`<div class="template-placeholder">${t.mode==='board'?'▦':'▤'}</div>`}<strong>${e(t.name)}</strong><small>${scope} · ${e(t.packId)} · ${e(t.packVersion)}</small></div>`}
-function templatesPanel(){return `<section class="card card-pad"><div class="header-row"><div><h2>Templates & assets</h2><p class="subtitle">Compatible shared references and templates private to ${e(state.client.name)}. The SmileCraft ZIP installs all ten master boards.</p></div><span class="pill">${state.templates.length} installed</span></div><div class="template-grid">${state.templates.length?state.templates.map(t=>libraryTemplateCard(t,state.client.id)).join(''):`<div class="empty">No compatible client templates yet.</div>`}</div><label class="file-upload" style="margin-top:16px"><input type="file" accept=".zip,application/zip" data-file="template-zip"><span>＋ Import template ZIP<br><small>SmileCraft 10-board pack, pack.json, or five ordered images</small></span></label>${state.importPreview?importPreview():''}</section>`}
-function importPreview(){const p=state.importPreview;return `<div class="note ${p.unresolved?'amber':''}" style="margin-top:14px"><b>${e(p.kind)} detected</b> · ${p.images?.length||0} image(s)<br>${e(p.message||'')}${p.unresolved?`<div class="mapping-grid">${[0,1,2,3,4].map(i=>`<label>Slide ${i+1}<select class="control" data-map-slide="${i}">${(p.images||[]).map((img,j)=>`<option value="${e(img.name)}" ${j===i?'selected':''}>${e(img.name)}</option>`).join('')}</select></label>`).join('')}</div><button class="btn soft" data-action="confirm-import-map">Use this mapping</button>`:''}<div class="actions right"><button class="btn primary" data-action="install-import" ${p.unresolved?'disabled':''}>Install validated pack</button></div></div>`}
-function clientPage(){return `<div class="header-row"><div><h1 class="page-title">${e(state.client.name)}</h1><p class="subtitle">${e(activePack()?.name)} · profile revision ${state.client.revision}</p></div><button class="btn primary" data-action="new-project">＋ New project</button></div><div class="tabs"><button class="tab active" data-tab-target="projects">Projects</button><button class="tab" data-tab-target="profile">Brand & Business</button><button class="tab" data-tab-target="templates">Templates & Assets</button></div><div data-tab="projects">${projectsPanel()}</div><div data-tab="profile" hidden>${profileFields()}</div><div data-tab="templates" hidden>${templatesPanel()}</div>`}
-function projectsPanel(){return `<section class="card card-pad"><div class="header-row"><div><h2>Projects</h2><p class="subtitle">Every project keeps its own pinned client context snapshot.</p></div><label class="btn tiny">↑ Import portable project<input type="file" accept="application/json,.json" data-file="project-json" hidden></label></div><div class="project-list">${state.projects.length?state.projects.map(p=>`<button class="project-row" data-action="open-project" data-id="${e(p.id)}"><span class="project-emoji">${e(activePack()?.icon||'▧')}</span><span class="rowinfo"><strong>${e(p.topic||'Untitled project')}</strong><small>Updated ${e((p.updatedAt||'').slice(0,16).replace('T',' '))}</small></span><span class="mini-stat">${p.slides.filter(s=>s.approved).length}/5 copy · ${p.slides.filter(s=>s.artworkAssetId&&s.artworkReviewed).length}/5 reviewed</span><span>Open →</span></button>`).join(''):`<div class="empty">No projects yet.</div>`}</div></section>`}
-function allProjectsPage(){return `<div class="header-row"><div><h1 class="page-title">All Projects</h1><p class="subtitle">Workspace-wide view with explicit client ownership.</p></div></div><div class="project-list">${state.allProjects.length?state.allProjects.map(p=>`<button class="project-row" data-action="open-owned-project" data-client="${e(p.clientId)}" data-id="${e(p.id)}"><span class="project-emoji">${e(pack(p.businessPackId)?.icon||'▧')}</span><span class="rowinfo"><strong>${e(p.topic||'Untitled project')}</strong><small>${e(p.clientName)} · ${e(pack(p.businessPackId)?.name||p.businessPackId)} · Updated ${e((p.updatedAt||'').slice(0,16).replace('T',' '))}</small></span><span class="mini-stat">${p.approved}/5 copy · ${p.reviewed}/5 reviewed</span><span>Open →</span></button>`).join(''):`<div class="empty">No projects yet.</div>`}</div>`}
-function sharedTemplatesPage(){const visible=state.sharedTemplates.filter(t=>!t.businessPackId||t.businessPackId===state.sharedPackId);return `<div class="header-row"><div><h1 class="page-title">Shared Templates</h1><p class="subtitle">Install references intentionally by business type. Client-private packs remain in the client workspace.</p></div><div class="actions" style="margin:0"><a class="btn tiny" href="/assets/PACKING-GUIDE.txt" download>↓ Packing guide</a><a class="btn tiny" href="/api/template-pack-example.zip" download>↓ Example ZIP</a></div></div><section class="card card-pad"><div class="grid-side"><div><label class="formlabel">Business type for shared import</label><select class="control" id="shared-pack">${state.packs.map(p=>`<option value="${e(p.id)}" ${p.id===state.sharedPackId?'selected':''}>${e(p.icon)} ${e(p.name)}</option>`).join('')}</select><label class="file-upload" style="margin-top:16px"><input type="file" accept=".zip,application/zip" data-file="shared-template-zip"><span>＋ Import shared template ZIP<br><small>Available only to compatible business packs</small></span></label>${state.importPreview?importPreview():''}</div><div class="note"><b>Choose Dental for the SmileCraft pack.</b><br>All ten master boards are detected from the original ZIP and become usable as full-board plus per-slide crop references.</div></div><div class="template-grid">${visible.map(t=>libraryTemplateCard(t)).join('')}</div></section>`}
-function settingsPage(){const s=state.status;return `<div class="header-row"><div><h1 class="page-title">Workspace Settings</h1><p class="subtitle">Local storage, provider readiness and legacy migration.</p></div></div><div class="grid-side"><section class="card card-pad"><h2>Provider status</h2>${Object.entries(s.textProviders||{}).map(([id,v])=>`<div class="status-row"><span>${e(v.label||id)}</span><b>${v.available?'Ready':'Unavailable'}</b></div>`).join('')}<div class="note" style="margin-top:14px">API keys remain in the server environment. The browser stores no provider credentials.</div></section><section class="card card-pad"><h2>Storage & migration</h2><p class="subtitle">SQLite: ${e(s.storage?.database||'')}</p><p class="subtitle">Assets: ${e(s.storage?.assets||'')}</p><div class="note ${state.migration.found?'amber':''}" style="margin-top:16px">Legacy flat projects found: <b>${state.migration.found||0}</b><br>Already migrated: ${state.migration.alreadyMigrated||0}<br>${state.migration.invalid?.length?`Malformed: ${state.migration.invalid.length}`:'No malformed legacy records detected.'}</div><div class="actions right"><button class="btn primary" data-action="migrate-legacy" ${state.migration.found?'':'disabled'}>Back up & migrate legacy projects</button></div></section></div>`}
-function workflow(){return `<div class="stepbar">${['Topic','Content','Design','Review','Export'].map((x,i)=>`<button class="step ${state.project.stage===i?'active':state.project.stage>i?'done':''}" data-action="stage" data-index="${i}"><span class="stepnum">${state.project.stage>i?'✓':i+1}</span>${x}</button>`).join('')}</div>`}
-function projectHeader(){return `<div class="header-row"><div><h1 class="page-title">${e(state.project.topic||'New carousel')}</h1><p class="subtitle">${e(state.client.name)} · ${e(activePack()?.name)} · project revision ${state.project.revision}</p></div><div class="actions" style="margin:0"><span class="pill">${approved()}/5 copy</span><span class="pill">${reviews()}/5 artwork reviewed</span><button class="btn tiny" data-action="apply-client">Apply latest client settings</button></div></div>`}
-function studio(){state.project.generation=repairGeneration(state.project.generation);const stage=Number(state.project.stage)||0;return `${projectHeader()}${workflow()}${state.generationError&&stage!==2?`<div class="note amber" role="alert">${e(state.generationError)}</div>`:""}${stage===0?topicStage():stage===1?contentStage():stage===2?designStage():stage===3?reviewStage():exportStage()}`}
-function topicStage(){const p=activePack();return `<div class="grid-2"><section class="card card-pad"><span class="pill">${e(p.icon)} ${e(p.name)}</span><h2 style="margin-top:15px">What should this carousel cover?</h2><label class="formlabel">Topic</label><textarea class="control biginput" data-project="topic">${e(state.project.topic)}</textarea><label class="formlabel">Extra supplied facts / constraints</label><textarea class="control area" data-project="notes">${e(state.project.notes||'')}</textarea><div class="subhead">Starter ideas</div><div class="chips">${p.topics.map(([key,label,topic])=>`<button class="chip" data-action="topic-preset" data-value="${e(topic)}">${e(label)}</button>`).join('')}</div>${generationControls(state.project.generation,state.status,'writing',e,state.agyModels)}<div class="actions"><button class="btn soft" data-action="starter">Use editable starter →</button><button class="btn primary" data-action="draft" ${state.busy?'disabled':''}>✦ Generate five-slide draft</button></div></section><aside class="card card-pad"><h2>Business & reference</h2><label class="formlabel">Carousel reference</label><select class="control" data-project="templateId">${state.templates.map(t=>`<option value="${e(t.id)}" ${t.id===state.project.templateId?'selected':''}>${e(t.name)}</option>`).join('')}</select><p class="subtitle">Writing uses your business rules and reference metadata. Image generation receives the actual selected artwork.</p><div class="note">Brand: <b>${e(state.project.contextSnapshot.brand.name)}</b><br>Language: ${e(state.project.contextSnapshot.language)}<br>CTA: ${e(state.project.contextSnapshot.cta.text)}<br>Snapshot stays pinned until you explicitly apply latest client settings.</div></aside></div>`}
-function slideTabs(){return `<div class="slide-tabs">${state.project.slides.map((s,i)=>`<button class="slide-tab ${i===state.index?'active':''} ${s.approved?'approved':''}" data-action="slide" data-index="${i}"><strong>Slide ${i+1}</strong>${e(s.role)}</button>`).join('')}</div>`}
-function contentStage(){const s=slide();return `<section class="card card-pad">${slideTabs()}<div class="two-col-editor"><div><div class="meta-row"><h2>${e(s.role)}</h2><span class="pill ${s.approved?'green':'amber'}">${s.approved?'Approved':'Needs approval'}</span></div><label class="formlabel">Heading</label><textarea class="control area textarea-small" data-slide="heading">${e(s.heading)}</textarea><label class="formlabel">Body</label><textarea class="control area textarea-small" data-slide="body">${e(s.body)}</textarea><label class="formlabel">Visual direction</label><textarea class="control area textarea-small" data-slide="visualPrompt">${e(s.visualPrompt)}</textarea>${generationControls(state.project.generation,state.status,'writing',e,state.agyModels)}<label class="formlabel">Correction for AI rewrite</label><textarea id="correction" class="control area textarea-small">${e(state.correction)}</textarea><div class="actions"><button class="btn soft" data-action="revise">✦ Rewrite this slide</button><button class="btn ${s.approved?'':'primary'}" data-action="approve">${s.approved?'Reopen':'✓ Approve slide'}</button></div></div><aside><div class="note"><b>${e(activePack().reviewerChecklist[0])}</b><br>${activePack().reviewerChecklist.slice(1).map(x=>`• ${e(x)}`).join('<br>')}</div></aside></div></section>`}
-function templateCard(t){const selected=state.project.templateId===t.id,src=templateImageUrl(t,state.client.id);return `<button class="template-card ${selected?'selected':''}" data-action="template" data-id="${e(t.id)}">${src?`<img src="${e(src)}" alt="${e(t.name)}" style="width:100%;height:210px;object-fit:contain;background:#eef7f7;border-radius:8px;display:block;margin-bottom:8px">`:`<div class="template-placeholder">▤</div>`}<strong>${e(t.name)}</strong><small>${t.clientId===null?'Shared':'Private'} · ${e(t.packVersion)}</small></button>`}
-function designStage(){const g=state.project.generation||{},b=state.batch;return `<section class="card card-pad"><h2>Choose a reference & generate</h2><p class="subtitle">Choose one design for all five slides. Each image uses the full board, its matching slide layout, your approved copy, and the client logo.</p><div class="template-grid">${state.templates.map(templateCard).join('')}</div><div class="actions"><button class="btn tiny" data-action="client-templates">Import template ZIP</button><label class="btn tiny">Upload custom reference<input type="file" hidden accept="image/png,image/jpeg,image/webp" data-file="custom-reference"></label></div></section><section class="card card-pad" style="margin-top:18px">${slideTabs()}<div class="grid-side"><div>${generationControls(g,state.status,'image',e,state.agyModels)}<p class="subtitle" style="margin-top:12px">Up to ${state.status.providerConcurrency?.[g.provider]||5} slides run together. Successful slides are kept when another slide fails.</p>${b?`<div class="note" role="status">Started ${b.started} · Running ${b.active} · Completed ${b.completed}/${b.total}</div>`:''}${state.generationError?`<div class="note amber" role="alert">${e(state.generationError)}</div>`:''}<div class="actions"><button class="btn soft" data-action="generate-one" ${!slide().approved||state.busy||!state.project.templateId?'disabled':''}>${slide().artworkAssetId?'Regenerate':'Generate'} selected slide</button><button class="btn primary" data-action="generate-all" ${approved()!==5||artworks()===5||state.busy||!state.project.templateId?'disabled':''}>${state.busy?'Generating…':`Generate missing (${5-artworks()})`}</button></div><div class="actions"><button class="btn" data-action="stage" data-index="1">← Content</button><button class="btn primary" data-action="stage" data-index="3">Review ${artworks()}/5 →</button></div></div><aside><h2>Slide ${state.index+1}</h2>${artworkPreview(slide())}<p>${e(slide().heading)}</p><button class="btn tiny" data-action="clear-artwork" ${!slide().artworkAssetId?'disabled':''}>Discard artwork</button></aside></div></section>`}
-function artworkUrl(s){return s?.artworkAssetId?`/api/clients/${state.client.id}/assets/${s.artworkAssetId}`:''}
-function artworkPreview(s){const selected=state.templates.find(t=>t.id===state.project?.templateId),src=selected?templateImageUrl(selected,state.client.id):'';return s?.artworkAssetId?`<div class="preview-frame"><img src="${artworkUrl(s)}" alt="Generated slide"></div>`:`<div class="empty">${src?`<img src="${e(src)}" alt="Selected design reference" style="width:100%;max-height:350px;object-fit:contain"><p>Reference only — generate this slide after approving its copy.</p>`:"Select a reference to get started."}</div>`}
-function reviewStage(){const s=slide();return `<section class="card card-pad"><div class="review-strip">${state.project.slides.map((x,i)=>`<button class="review-slide ${i===state.index?'active':''}" data-action="slide" data-index="${i}">${x.artworkAssetId?`<img src="${artworkUrl(x)}">`:`<div class="review-empty">0${i+1}</div>`}<small>${e(x.role)} ${x.artworkReviewed?'✓ reviewed':''}</small></button>`).join('')}</div><div class="review-layout"><div>${artworkPreview(s)}</div><div><h2>Compare with approved copy</h2><p><b>${e(s.heading)}</b></p><p>${e(s.body)}</p><div class="note amber">Check every rendered word, exact logo/contact detail, business claim and visual before marking reviewed.</div><div class="actions"><button class="btn" data-action="download-one" ${!s.artworkAssetId?'disabled':''}>Download this PNG</button><button class="btn" data-action="stage" data-index="2">Regenerate artwork</button><button class="btn primary" data-action="review-art" ${!s.artworkAssetId?'disabled':''}>${s.artworkReviewed?'↶ Reopen artwork review':'✓ Mark artwork reviewed'}</button></div></div></div></section>`}
-function captions(){const p=state.project,c=p.contextSnapshot,contact=[c.brand.name,c.brand.phone,c.brand.location].filter(Boolean).join(' · '),instagram=p.instagram||`${p.topic}\n\n${p.slides.map(s=>`${s.heading} — ${s.body}`).join('\n\n')}\n\n${contact}\n\n${(c.captionTags||[]).join(' ')}`,youtubeTitle=p.youtubeTitle||`${p.topic} | ${c.brand.name}`,youtubeDescription=p.youtubeDescription||`${p.topic}\n\n${p.slides.map((s,i)=>`${i+1}. ${s.heading}: ${s.body}`).join('\n\n')}\n\n${contact}`;return{instagram,youtubeTitle,youtubeDescription}}
-function exportStage(){const ready=approved()===5&&artworks()===5&&reviews()===5,c=captions(),key=state.captionTab,value=c[key];return `<div class="grid-side"><section class="card card-pad"><h2>Export readiness</h2><div class="metric-grid compact"><div class="metric"><b>${approved()}/5</b><span>Copy approved</span></div><div class="metric"><b>${artworks()}/5</b><span>Artwork current</span></div><div class="metric"><b>${reviews()}/5</b><span>Artwork reviewed</span></div></div><div class="note ${ready?'':'amber'}">${ready?'Current project is ready. Export will create five 1080 × 1350 PNGs plus a portable project backup.':'Finish current copy approval, artwork generation and explicit artwork review before export.'}</div><div class="actions right"><button class="btn primary big" data-action="export" ${ready?'':'disabled'}>↓ Download portable ZIP</button></div></section><aside class="card card-pad"><div class="caption-tabs">${[['instagram','Instagram'],['youtubeTitle','YouTube title'],['youtubeDescription','YouTube description']].map(([k,l])=>`<button class="btn tiny ${key===k?'active':''}" data-action="caption-tab" data-value="${k}">${l}</button>`).join('')}</div><textarea class="control captionbox" data-caption="${e(key)}">${e(value)}</textarea></aside></div>`}
-function render(){let content=state.view==='overview'?overview():state.view==='clients'?clientsPage():state.view==='client'?clientPage():state.view==='studio'?studio():state.view==='template-maker'?templateMakerPage():state.view==='all-projects'?allProjectsPage():state.view==='shared'?sharedTemplatesPage():settingsPage();root.innerHTML=shell(content);if(state.view==='client'&&state.clientTab)root.querySelector(`[data-tab-target="${state.clientTab}"]`)?.click();if(state.busy)root.querySelectorAll('textarea, input, select, [data-action="approve"], [data-action="review-art"]').forEach(x=>x.disabled=true)}
-async function saveClient(){const brand={...state.client.brand},profile={...state.client.profile};document.querySelectorAll('[data-client-brand]').forEach(x=>brand[x.dataset.clientBrand]=x.value);document.querySelectorAll('[data-client-profile]').forEach(x=>profile[x.dataset.clientProfile]=x.value);const {client}=await api(`/api/clients/${state.client.id}`,{expectedRevision:state.client.revision,name:brand.name||state.client.name,brand,profile},'PATCH');state.client=client;toast('Client profile saved. Existing projects remain pinned until explicitly refreshed.');render()}
-let saveChain=Promise.resolve(),editVersion=0;
-async function saveProject(){
-  clearTimeout(state.saveTimer);
-  const operation=async()=>{
-    const p=state.project,c=state.client;if(!p?.id)return;
-    const version=editVersion,body=JSON.parse(JSON.stringify({expectedRevision:p.revision,topic:p.topic,notes:p.notes,stage:p.stage,templateId:p.templateId,slides:p.slides,instagram:p.instagram,youtubeTitle:p.youtubeTitle,youtubeDescription:p.youtubeDescription,generation:repairGeneration(p.generation)}));
-    const {project}=await api('/api/clients/'+c.id+'/projects/'+p.id,body,'PATCH');
-    if(state.project?.id===p.id){if(version===editVersion)state.project=project;else state.project.revision=project.revision;}
-  };
-  const result=saveChain.then(operation);saveChain=result.catch(()=>{});return result;
+import { starterSlides } from "./data.js";
+import { IMAGE_MODELS, WRITING_MODELS } from "./provider-models.js";
+import { runConcurrent } from "./batch-runner.js";
+import { makeZip, downloadBlob } from "./zip.js";
+const root = document.querySelector("#app"),
+  T = document.querySelector("#toast"),
+  E = (v) =>
+    String(v ?? "").replace(
+      /[&<>"']/g,
+      (c) =>
+        ({
+          "&": "&amp;",
+          "<": "&lt;",
+          ">": "&gt;",
+          '"': "&quot;",
+          "'": "&#39;",
+        })[c],
+    );
+let S = {
+  view: "home",
+  packs: [],
+  clients: [],
+  all: [],
+  dash: {},
+  status: {},
+  shared: [],
+  client: null,
+  projects: [],
+  templates: [],
+  p: null,
+  i: 0,
+  busy: "",
+  imageProgress: null,
+  customLanguage: false,
+  tab: "overview",
+  form: false,
+  import: null,
+  importId: "",
+  regenerationNotes: {},
+  create: { clientId: "", goal: "Educate", topic: "", facts: "" },
+};
+const api = async (u, d, m = d === undefined ? "GET" : "POST", raw = false) => {
+  let o = { method: m, headers: {} };
+  if (d !== undefined) {
+    o.body = raw ? d : JSON.stringify(d);
+    o.headers["Content-Type"] = raw ? "application/zip" : "application/json";
+  }
+  let r = await fetch(u, o),
+    j = await r.json().catch(() => ({}));
+  if (!r.ok) throw Error(j.error || "Something went wrong.");
+  return j;
+};
+const toast = (x) => {
+    T.textContent = x;
+    T.classList.add("show");
+    setTimeout(() => T.classList.remove("show"), 4000);
+  },
+  pk = (id) => S.packs.find((x) => x.id === id) || {},
+  sp = () => S.p?.slides[S.i],
+  ap = () => S.p?.slides.filter((x) => x.approved).length || 0,
+  im = () => S.p?.slides.filter((x) => x.artworkAssetId).length || 0,
+  rv = () =>
+    S.p?.slides.filter((x) => x.artworkAssetId && x.artworkReviewed).length ||
+    0;
+const status = (p) => {
+  let a = p.slides.filter((x) => x.approved).length,
+    i = p.slides.filter((x) => x.artworkAssetId).length,
+    r = p.slides.filter((x) => x.artworkAssetId && x.artworkReviewed).length;
+  return r === 5
+    ? "Ready to export"
+    : i
+      ? `${5 - r} need review`
+      : a === 5
+        ? "Ready to generate"
+        : a
+          ? "Copy needs review"
+          : "Brief started";
+};
+async function load() {
+  let [a, b, c, d, e, f] = await Promise.all([
+    api("/api/business-packs"),
+    api("/api/clients"),
+    api("/api/dashboard"),
+    api("/api/status"),
+    api("/api/all-projects"),
+    api("/api/templates/shared"),
+  ]);
+  Object.assign(S, {
+    packs: a.packs,
+    clients: b.clients,
+    dash: c,
+    status: d,
+    all: e.projects,
+    shared: f.templates,
+  });
+  S.create.clientId ||= S.clients[0]?.id;
 }
-function scheduleSave(){editVersion++;clearTimeout(state.saveTimer);state.saveTimer=setTimeout(()=>saveProject().catch(err=>{state.generationError=err.status===409?'This project changed in another window. Reopen it before continuing.':err.message;toast(state.generationError)}),700)}
-async function job(stage,extra={}){
-  const p=state.project,c=state.client,g=repairGeneration(p.generation);
-  state.busy=stage;state.generationError='';render();
-  try{const {job,project}=await api('/api/clients/'+c.id+'/projects/'+p.id+'/jobs',{stage,provider:stage==='image'?g.provider:g.writingProvider,model:stage==='image'?g.model:g.writingModel,...extra,idempotencyKey:crypto.randomUUID()});
-    if(state.project?.id===p.id&&project)state.project=project;
-    toast(job.status==='superseded'?'Inputs changed; the result was kept but not applied.':(stage==='image'?'Artwork':'Copy')+' ready for review.');
-  }catch(err){state.generationError=friendlyGenerationError(err);toast(state.generationError)}finally{state.busy='';render()}
+async function client(id) {
+  let [a, b, c] = await Promise.all([
+    api(`/api/clients/${id}`),
+    api(`/api/clients/${id}/projects`),
+    api(`/api/clients/${id}/templates`),
+  ]);
+  Object.assign(S, {
+    client: a.client,
+    projects: b.projects,
+    templates: c.templates,
+    view: "client",
+    tab: "overview",
+    p: null,
+  });
+  render();
 }
-async function generateAll(){
-  const p=state.project,clientId=state.client.id,g=repairGeneration(p.generation),base='/api/clients/'+clientId+'/projects/'+p.id;
-  const pending=p.slides.map((s,i)=>s.artworkAssetId?null:i).filter(i=>i!==null);if(!pending.length)return;
-  state.busy='all-images';state.generationError='';state.batch={started:0,active:0,completed:0,total:pending.length};render();
-  try{
-    const result=await runConcurrent(pending,Number(state.status.providerConcurrency?.[g.provider])||5,i=>api(base+'/jobs',{stage:'image',provider:g.provider,model:g.model,slideIndex:i,idempotencyKey:crypto.randomUUID()}),{
-      onStart:({active})=>{state.batch.started++;state.batch.active=active;render()},
-      onComplete:({active,completed})=>{state.batch.active=active;state.batch.completed=completed;render()}
+async function project(id) {
+  S.p = (await api(`/api/clients/${S.client.id}/projects/${id}`)).project;
+  S.p.language ||= S.p.contextSnapshot?.language || "english";
+  S.customLanguage = !(pk(S.client.businessPackId).languages || []).some(
+    (language) => language.id === S.p.language,
+  );
+  S.view = "studio";
+  S.i = 0;
+  render();
+}
+function nav() {
+  return `<aside><button class="brand" data-a="nav" data-v="home">✦ <b>Carousel <em>Studio</em></b><small>Creative workspace</small></button>${[
+    ["home", "⌂ Home"],
+    ["create", "＋ Create carousel"],
+    ["projects", "▧ Projects"],
+    ["clients", "◉ Clients"],
+    ["library", "✦ Library"],
+    ["settings", "⚙ Settings"],
+  ]
+    .map(
+      ([v, x]) =>
+        `<button class="nav ${S.view === v || (v === "clients" && S.view === "client") ? "on" : ""}" data-a="nav" data-v="${v}">${x}</button>`,
+    )
+    .join(
+      "",
+    )}<p class="side-note"><b>Make ideas publish-ready.</b>Draft, review and export in one calm workflow.</p></aside>`;
+}
+function shell(x) {
+  root.innerHTML = `<div class="shell">${nav()}<main><header><span>Carousel Studio${S.client ? " / " + E(S.client.name) : ""}</span><button class="btn primary" data-a="nav" data-v="create">＋ Create carousel</button></header>${x}</main></div>`;
+}
+const card = (p) =>
+  `<button class="project" data-a="open" data-c="${E(p.clientId || S.client.id)}" data-id="${E(p.id)}"><i>${E(pk(p.businessPackId || S.client.businessPackId).icon || "✦")}</i><span><small>${E(p.clientName || S.client?.name || "Client")}</small><b>${E(p.topic || "Untitled carousel")}</b><em>${status(p)}</em></span><strong>Open →</strong></button>`;
+function home() {
+  return `<section class="hero"><span>YOUR CREATIVE WORKSPACE</span><h1>Create carousels<br>people want to swipe.</h1><p>Turn a client brief into polished, reviewed social content.</p><button class="btn primary big" data-a="nav" data-v="create">Create a carousel →</button></section><div class="metrics">${[
+    ["Clients", S.dash.clients],
+    ["Projects", S.dash.projects],
+    ["Need review", S.dash.review],
+    ["Generating", S.dash.running],
+  ]
+    .map((x) => `<div><b>${x[1] || 0}</b>${x[0]}</div>`)
+    .join(
+      "",
+    )}</div><h2>Pick up where you left off</h2><p class="muted">Every project shows its next useful step.</p><div class="list">${S.all.slice(0, 6).map(card).join("") || '<div class="empty">Add a client, then create your first carousel.</div>'}</div>`;
+}
+function create() {
+  return `<div class="intro"><span>NEW PROJECT</span><h1>Let’s make a carousel.</h1><p>Start with the message. We’ll guide the production steps.</p></div><section class="card form"><h2>1. Choose a client</h2><select class="control" data-x="clientId">${S.clients.map((c) => `<option value="${c.id}" ${c.id === S.create.clientId ? "selected" : ""}>${E(c.name)} · ${E(pk(c.businessPackId).name)}</option>`).join("")}</select><h2>2. What is this for?</h2><div class="goals">${["Educate", "Promote a service", "Answer a question", "Announce an offer", "Showcase work", "Custom"].map((x) => `<button class="goal ${S.create.goal === x ? "sel" : ""}" data-a="goal" data-v="${x}">${x}</button>`).join("")}</div><h2>3. Tell us the core idea</h2><textarea class="control" data-x="topic" placeholder="What should this carousel cover?">${E(S.create.topic)}</textarea><label>Important facts or things to avoid <small>Optional</small></label><textarea class="control" data-x="facts">${E(S.create.facts)}</textarea><p class="muted">Generation settings use your workspace defaults. They are kept out of the creative flow.</p><button class="btn primary big right" data-a="new">Create draft →</button></section>`;
+}
+function clients() {
+  return `<div class="intro row"><div><span>CLIENTS</span><h1>Your client space.</h1><p>Brand, rules and styles stay separate for every business.</p></div><button class="btn primary" data-a="form">＋ Add client</button></div>${S.form ? `<section class="card add"><input id="name" class="control" placeholder="Business name"><select id="pack" class="control">${S.packs.map((x) => `<option value="${x.id}">${E(x.icon)} ${E(x.name)}</option>`).join("")}</select><button class="btn primary" data-a="add">Create client</button></section>` : ""}<div class="clients">${S.clients.map((c) => `<button data-a="client" data-id="${c.id}"><i>${E(pk(c.businessPackId).icon)}</i><b>${E(c.name)}</b><small>${E(pk(c.businessPackId).name)}</small>Open workspace →</button>`).join("") || '<div class="empty">No clients yet.</div>'}</div>`;
+}
+function clientPage() {
+  return `<div class="intro row"><div><span>${E(pk(S.client.businessPackId).name)}</span><h1>${E(S.client.name)}</h1><p>Finish your brand kit for stronger, safer results.</p></div><button class="btn primary" data-a="create-client">Create carousel →</button></div><div class="tabs">${[
+    ["overview", "Overview"],
+    ["projects", "Projects"],
+    ["brand", "Brand kit"],
+    ["styles", "Styles"],
+  ]
+    .map(
+      (x) =>
+        `<button class="${S.tab === x[0] ? "on" : ""}" data-a="tab" data-v="${x[0]}">${x[1]}</button>`,
+    )
+    .join(
+      "",
+    )}</div>${S.tab === "overview" ? `<section class="card ready"><h2>Make this client ready to create</h2>${["Business details", "Contact details", "Logo and colours", "Choose a style"].map((x, i) => `<button data-a="tab" data-v="${i === 3 ? "styles" : "brand"}">○ ${x}<span>Add →</span></button>`).join("")}</section>` : S.tab === "projects" ? `<div class="list">${S.projects.map(card).join("") || '<div class="empty">No projects yet.</div>'}</div>` : S.tab === "brand" ? brand() : styles(S.templates, true)}`;
+}
+function brand() {
+  let b = S.client.brand || {},
+    p = S.client.profile || {},
+    q = pk(S.client.businessPackId);
+  return `<section class="card form"><h2>Brand kit</h2><p class="muted">These changes improve future projects. Existing work stays protected.</p><label>Business name</label><input class="control" data-b="name" value="${E(b.name || S.client.name)}"><div class="two"><label>Phone<input class="control" data-b="phone" value="${E(b.phone || "")}"></label><label>Location / service area<input class="control" data-b="location" value="${E(b.location || "")}"></label></div><div class="two"><label>Primary colour<input type="color" data-b="primary" value="${E(b.primary || "#073a42")}"></label><label>Accent colour<input type="color" data-b="accent" value="${E(b.accent || "#14ada9")}"></label></div>${(q.onboardingFields || []).map(([k, l, t]) => `<label>${E(l)}${t === "textarea" ? `<textarea class="control" data-p="${k}">${E(p[k] || "")}</textarea>` : `<input class="control" data-p="${k}" value="${E(p[k] || "")}">`}</label>`).join("")}<button class="btn primary right" data-a="save">Save brand kit</button></section>`;
+}
+const img = (t) => {
+  let r = t.mode === "slides" ? t.data?.slides?.[0] : t.data;
+  if (r?.staticPath) return r.staticPath;
+  if (!r?.assetId) return "";
+  return t.clientId === null
+    ? `/api/template-assets/${r.assetId}`
+    : `/api/clients/${S.client?.id}/assets/${r.assetId}`;
+};
+function styles(ts, upload = false) {
+  return `<section class="card form"><div class="style-head"><div><h2>Visual styles</h2><p class="muted">Choose a style for consistent carousel artwork.</p></div>${upload ? `<label class="btn upload">＋ Upload design package<input type="file" data-file="design-package" accept=".zip,application/zip"></label>` : ""}</div>${S.import ? `<div class="import-status ${S.import.unresolved ? "warn" : ""}"><b>${E(S.import.kind || "Design package")} detected</b><span>${E(S.import.message || `${S.import.images?.length || 0} images validated.`)}</span>${S.import.unresolved ? `<small>Confirm the detected image order to map slides 1–5.</small><button class="btn primary" data-a="confirm-design">Use detected order</button>` : `<button class="btn primary" data-a="install-design">Install for ${E(S.client.name)}</button>`}</div>` : ""}<div class="styles">${ts.map((t) => `<div>${img(t) ? `<img src="${img(t)}">` : "✦"}<b>${E(t.name)}</b><small>${t.clientId === null ? "Shared" : "Private"} style</small></div>`).join("") || '<div class="empty">No styles installed yet. Upload a ZIP design package above.</div>'}</div></section>`;
+}
+function library() {
+  return `<div class="intro"><span>LIBRARY</span><h1>Styles and creative references.</h1><p>Shared styles are available to compatible client types.</p></div>${styles(S.shared)}`;
+}
+function settings() {
+  return `<div class="intro"><span>SETTINGS</span><h1>Workspace settings.</h1><p>Technical setup stays here, away from your creative work.</p></div><section class="card form"><h2>Generation providers</h2>${Object.entries(
+    S.status.textProviders || {},
+  )
+    .map(
+      ([k, v]) =>
+        `<p class="provider">${E(v.label || k)} <b>${v.available ? "Ready" : "Not connected"}</b></p>`,
+    )
+    .join("")}</section>`;
+}
+function render() {
+  let content =
+    S.view === "home"
+      ? home()
+      : S.view === "create"
+        ? create()
+        : S.view === "projects"
+          ? `<div class="intro"><span>PROJECTS</span><h1>All projects.</h1><p>Find the next action for every client.</p></div><div class="list">${S.all.map(card).join("") || '<div class="empty">No projects yet.</div>'}</div>`
+          : S.view === "clients"
+            ? clients()
+            : S.view === "client"
+              ? clientPage()
+              : S.view === "library"
+                ? library()
+                : S.view === "settings"
+                  ? settings()
+                  : studio();
+  shell(content);
+}
+function studio() {
+  let p = S.p;
+  return `<div class="studio-title"><button data-a="back">← Projects</button><h1>${E(p.topic || "New carousel")}</h1><p>${E(S.client.name)} · ${status(p)}</p></div><div class="steps">${["Brief", "Copy", "Style", "Review", "Export"].map((x, i) => `<button class="${p.stage === i ? "on" : ""}" data-a="stage" data-v="${i}">${i + 1}. ${x}</button>`).join("")}</div>${p.stage === 0 ? brief() : p.stage === 1 ? copy() : p.stage === 2 ? design() : p.stage === 3 ? review() : exportPage()}`;
+}
+function writingControls() {
+  const g =
+    S.p.generation ||
+    (S.p.generation = {
+      writingProvider: "codex",
+      writingModel: "gpt-5.6-sol",
     });
-    const {project}=await api(base);if(state.project?.id===p.id)state.project=project;
-    const failed=result.results.map((r,i)=>r.status==='rejected'?'Slide '+(pending[i]+1)+': '+friendlyGenerationError(r.reason):'').filter(Boolean);
-    state.generationError=failed.join(' ');
-    toast(failed.length?(pending.length-failed.length)+' completed, '+failed.length+' failed. Retry missing slides.':'All artwork is ready for review.');
-  }catch(err){state.generationError=friendlyGenerationError(err);toast(state.generationError)}finally{state.busy='';render()}
+  const models = WRITING_MODELS[g.writingProvider] || [];
+  return `<div class="model-panel"><label>Writing provider<select class="control" data-g="writingProvider">${Object.keys(
+    WRITING_MODELS,
+  )
+    .map(
+      (id) =>
+        `<option value="${id}" ${id === g.writingProvider ? "selected" : ""} ${S.status.textProviders?.[id]?.available ? "" : "disabled"}>${E(S.status.textProviders?.[id]?.label || id)}${S.status.textProviders?.[id]?.available ? "" : " — unavailable"}</option>`,
+    )
+    .join(
+      "",
+    )}</select></label><label>Model<select class="control" data-g="writingModel">${models.map(([id, label]) => `<option value="${id}" ${id === g.writingModel ? "selected" : ""}>${E(label)}</option>`).join("")}</select></label></div>`;
 }
-async function exportZip(){try{const c=captions(),slug=(state.client.name+'-'+(state.project.topic||'carousel')).normalize('NFKD').replace(/[^a-zA-Z0-9]+/g,'-').replace(/^-|-$/g,'').slice(0,60)||'carousel',dir=`${slug}`,entries=[],embedded={artworks:{},logo:null};for(let i=0;i<5;i++){const s=state.project.slides[i],r=await fetch(artworkUrl(s)),blob=await r.blob(),png=await normalizePng(blob);entries.push({name:`${dir}/${String(i+1).padStart(2,'0')}.png`,data:png});embedded.artworks[s.id]=await blobDataUrl(png)}if(state.project.contextSnapshot.brand.logoAssetId){const r=await fetch(`/api/clients/${state.client.id}/assets/${state.project.contextSnapshot.brand.logoAssetId}`);if(r.ok)embedded.logo=await blobDataUrl(await r.blob())}const selectedTemplate=state.templates.find(t=>t.id===state.project.templateId);if(selectedTemplate){const images=[];if(selectedTemplate.mode==='slides'){for(const ref of selectedTemplate.data.slides||[]){const url=ref.staticPath||`/api/clients/${state.client.id}/assets/${ref.assetId}`,r=await fetch(url);if(r.ok)images.push(await blobDataUrl(await r.blob()))}}else{const r=await fetch(selectedTemplate.data.staticPath||`/api/clients/${state.client.id}/assets/${selectedTemplate.data.assetId}`);if(r.ok)images.push(await blobDataUrl(await r.blob()))}embedded.template={mode:selectedTemplate.mode,name:selectedTemplate.name,images,crops:selectedTemplate.data.crops||[]};}
-const portable={schemaVersion:2,source:'Carousel Studio portable project',project:{...state.project,...c},embeddedAssets:embedded};entries.push({name:`${dir}/instagram_caption.txt`,data:c.instagram},{name:`${dir}/youtube_title.txt`,data:c.youtubeTitle},{name:`${dir}/youtube_description.txt`,data:c.youtubeDescription},{name:`${dir}/project.json`,data:JSON.stringify(portable,null,2)},{name:`${dir}/README.txt`,data:'Five 1080x1350 PNG slides. Verify all text, identity, claims and visuals before publishing. project.json embeds current generated artwork and logo for backup.\n'});downloadBlob(await makeZip(entries),`${slug}.zip`);toast('Portable ZIP downloaded.')}catch(err){toast(err.message)}}
-async function normalizePng(blob){const img=await createImageBitmap(blob),canvas=document.createElement('canvas');canvas.width=1080;canvas.height=1350;const ctx=canvas.getContext('2d'),scale=Math.max(1080/img.width,1350/img.height),w=img.width*scale,h=img.height*scale;ctx.drawImage(img,(1080-w)/2,(1350-h)/2,w,h);img.close();return new Promise((resolve,reject)=>canvas.toBlob(b=>b?resolve(b):reject(new Error('Could not prepare PNG.')),'image/png'))}
-async function compactBoard(dataUrl){const img=await createImageBitmap(dataURLBlob(dataUrl)),canvas=document.createElement('canvas'),scale=Math.min(1,1448/img.width,1086/img.height);canvas.width=Math.round(img.width*scale);canvas.height=Math.round(img.height*scale);canvas.getContext('2d').drawImage(img,0,0,canvas.width,canvas.height);img.close();return new Promise((resolve,reject)=>canvas.toBlob(b=>b?resolve(b):reject(new Error('Could not compress a template board.')),'image/jpeg',.84))}
-function blobDataUrl(blob){return new Promise((resolve,reject)=>{const r=new FileReader();r.onload=()=>resolve(String(r.result));r.onerror=reject;r.readAsDataURL(blob)})}
-async function generateTemplateSystem(){const m=state.maker;if(!m.name.trim()||!m.businessType.trim()||!m.logoImage)throw new Error('Add the business name, industry and exact logo first.');state.busy='template-maker';m.results=[];m.errors=[];m.progress=0;render();try{const completed=await runConcurrent(DESIGN_SYSTEMS,2,async design=>{const r=await api('/api/template-maker/render',{designId:design.id,design:{name:design.name,kind:design.kind},brand:{name:m.name,primary:m.primary,accent:m.accent},businessType:m.businessType,language:m.language,languageNotes:m.languageNotes,direction:m.direction,provider:m.provider,model:m.model,logoImage:m.logoImage,moodImage:m.moodImage});return{id:design.id,name:design.name,image:r.image,crop:design.crop}},{onComplete:({completed})=>{m.progress=completed;render()}});m.results=completed.results.filter(x=>x.status==='fulfilled').map(x=>x.value);m.errors=completed.results.map((x,i)=>x.status==='rejected'?`${DESIGN_SYSTEMS[i].name}: ${friendlyGenerationError(x.reason)}`:'').filter(Boolean);if(m.results.length===10)toast('Your original 10-template design system is ready.');else toast(`${m.results.length}/10 designs completed. Fix the failed items and try again.`)}finally{state.busy='';render()}}
-async function applyLogoColors(){const m=state.maker;if(!m.logoImage)throw new Error('Upload a logo first.');const colors=await analyzeLogoColors(m.logoImage);m.primary=colors.primary;m.accent=colors.accent;m.logoColorsAnalyzed=true;m.results=[];render();toast(`Logo palette applied: ${colors.primary} and ${colors.accent}.`)}
-async function downloadTemplateSystem(){const m=state.maker;if(m.results.length!==10)throw new Error('Generate all ten design directions first.');const slug=(m.name||'business').normalize('NFKD').replace(/[^a-zA-Z0-9]+/g,'-').replace(/^-|-$/g,'').toLowerCase()||'business',templates=[],entries=[];for(const r of m.results){const filename=`templates/${r.id}.jpg`,c=r.crop,panel=(1-c.left-c.right-c.gap*4)/5;entries.push({name:filename,data:await compactBoard(r.image)});templates.push({id:r.id,name:r.name,mode:'board',image:filename,crops:Array.from({length:5},(_,i)=>({position:i+1,x:c.left+i*(panel+c.gap),y:c.top,width:panel,height:c.bottom-c.top}))})}const pack={schemaVersion:1,id:`${slug}-design-system`,version:'1.0.0',name:`${m.name} — 10-template design system`,businessType:m.businessType,brand:{name:m.name,primary:m.primary,accent:m.accent,language:m.language,languageNotes:m.languageNotes},templates};entries.push({name:'pack.json',data:JSON.stringify(pack,null,2)},{name:'brand-brief.json',data:JSON.stringify({...pack.brand,businessType:m.businessType,direction:m.direction},null,2)},{name:'logo-original',data:dataURLBlob(m.logoImage)},{name:'README.txt',data:`Original AI-assisted template system created for ${m.name}. Includes 10 compressed five-slide master boards inspired by design principles from the SmileCraft reference collection. Review all generated text, logo rendering and imagery before publishing. Import this ZIP under Templates & Assets.\n`});if(m.moodImage)entries.push({name:'optional-reference-original',data:dataURLBlob(m.moodImage)});downloadBlob(await makeZip(entries),`${slug}-template-system.zip`);toast('Compressed template design-system ZIP downloaded.')}
-async function fileInput(input){const file=input.files?.[0];if(!file)return;try{if(input.dataset.file==='maker-logo'||input.dataset.file==='maker-mood'){if(file.size>12_000_000)throw new Error('Please use an image under 12 MB.');const key=input.dataset.file==='maker-logo'?'logo':'mood';state.maker[key+'Image']=await blobDataUrl(file);state.maker[key+'Name']=file.name;if(key==='logo')state.maker.logoColorsAnalyzed=false;state.maker.results=[];render();return}if(input.dataset.file==='custom-reference'){await saveProject();const {template}=await api('/api/clients/'+state.client.id+'/templates',{name:file.name,image:await blobDataUrl(file)});state.templates.unshift(template);state.project.templateId=template.id;state.project.slides=state.project.slides.map(s=>({...s,artworkAssetId:'',artworkReviewed:false}));await saveProject();render();toast('Custom reference selected for this project.');return}if(input.dataset.file==='project-json'){const portable=JSON.parse(await file.text());const {project}=await api(`/api/clients/${state.client.id}/import-project`,portable);state.projects.unshift(project);state.project=project;state.view='studio';state.index=0;toast('Portable project imported into this client with remapped assets.');render();return}if(input.dataset.file==='logo'){const image=await blobDataUrl(file),{asset}=await api(`/api/clients/${state.client.id}/assets`,{kind:'client-logo',name:file.name,image});const {client}=await api(`/api/clients/${state.client.id}`,{expectedRevision:state.client.revision,brand:{...state.client.brand,logoAssetId:asset.id}},'PATCH');state.client=client;toast('Logo saved to this client.');render()}else if(input.dataset.file==='template-zip'||input.dataset.file==='shared-template-zip'){const shared=input.dataset.file==='shared-template-zip',packId=shared?(document.querySelector('#shared-pack')?.value||state.sharedPackId):state.client.businessPackId,clientId=shared?'':state.client.id,scope=shared?'shared':'client';state.sharedPackId=packId;const r=await api(`/api/template-imports?clientId=${encodeURIComponent(clientId)}&businessPackId=${encodeURIComponent(packId)}&scope=${scope}`,await file.arrayBuffer(),'POST',true);state.importId=r.id;state.importPreview=r.preview;render()}}catch(err){toast(err.message)}}
-async function refreshAgyModels(){state.agyModels=(await api('/api/models/agy')).models||[];const g=state.project?.generation;if(g){for(const [providerKey,modelKey] of [['provider','model'],['writingProvider','writingModel']])if(g[providerKey]==='antigravity'&&!state.agyModels.some(m=>m.id===g[modelKey]))g[modelKey]=state.agyModels[0]?.id||'';scheduleSave()}}
-async function action(node){const a=node.dataset.action;try{
-if(state.busy&&a!=='slide'){toast('Generation is running. You can inspect slides while it finishes.');return}
-if(a==='refresh-agy'){await refreshAgyModels();return render()}
-if(a==='analyze-logo-colors')return applyLogoColors()
-if(a==='generate-template-system')return generateTemplateSystem()
-if(a==='download-template-system')return downloadTemplateSystem()
-if(['nav','open-client','client-home','open-owned-project','new-project','open-project','client-templates','apply-client','export'].includes(a)&&state.project)await saveProject();
-if(a==='nav'){state.view=node.dataset.value;state.client=null;state.project=null;if(state.view==='overview')await refreshAll();return render()}if(a==='open-client')return selectClient(node.dataset.id);if(a==='client-home')return selectClient(state.client.id);if(a==='open-owned-project'){await selectClient(node.dataset.client);return openProject(node.dataset.id)}if(a==='migrate-legacy'){const r=await api('/api/migration/apply',{});toast(`Migrated ${r.migrated||0} legacy project(s).`);await refreshAll();return render()}if(a==='create-client'){const name=document.querySelector('#new-client-name').value,packId=document.querySelector('#new-client-pack').value,{client}=await api('/api/clients',{name,businessPackId:packId});await refreshAll();return selectClient(client.id)}if(a==='save-client')return saveClient();if(a==='new-project'){const {project}=await api(`/api/clients/${state.client.id}/projects`,{});state.projects.unshift(project);state.project=project;state.view='studio';state.index=0;return render()}if(a==='open-project')return openProject(node.dataset.id);if(a==='stage'){state.project.stage=Number(node.dataset.index);scheduleSave();return render()}if(a==='slide'){state.index=Number(node.dataset.index);state.correction='';return render()}if(a==='topic-preset'){state.project.topic=node.dataset.value;scheduleSave();return render()}if(a==='starter'){if(activePack().id==='dental'&&state.project.contextSnapshot.language==='malayalam-english'&&!state.project.slides.some(s=>s.approved||s.artworkAssetId))state.project.slides=starterSlides(state.project.topic).map((s,i)=>({...state.project.slides[i],...s}));state.project.stage=1;scheduleSave();return render()}if(a==='draft'){await saveProject();return job('draft')}if(a==='approve'){await saveProject();slide().approved=!slide().approved;slide().approvedAt=slide().approved?new Date().toISOString():'';if(!slide().approved){slide().artworkAssetId='';slide().artworkReviewed=false}scheduleSave();return render()}if(a==='revise'){await saveProject();return job('revise',{slideIndex:state.index,correction:document.querySelector('#correction')?.value||''})}if(a==='template'){if(state.project.templateId!==node.dataset.id){state.project.templateId=node.dataset.id;state.project.slides=state.project.slides.map(s=>({...s,artworkAssetId:'',artworkReviewed:false}))}scheduleSave();return render()}if(a==='client-templates'){state.view='client';render();document.querySelector('[data-tab-target="templates"]')?.click();return}if(a==='generate-one'){await saveProject();return job('image',{slideIndex:state.index})}if(a==='generate-all'){await saveProject();return generateAll()}if(a==='review-art'){slide().artworkReviewed=!slide().artworkReviewed;slide().artworkReviewedAt=slide().artworkReviewed?new Date().toISOString():'';scheduleSave();return render()}if(a==='apply-client'){const {project}=await api(`/api/clients/${state.client.id}/projects/${state.project.id}/apply-client-settings`,{expectedRevision:state.project.revision});state.project=project;toast('Latest client settings applied; dependent approvals/artwork were reopened.');return render()}if(a==='confirm-import-map'){const selected=[...document.querySelectorAll('[data-map-slide]')].map((x,i)=>({position:i+1,image:x.value}));const preview=await api(`/api/template-imports/${state.importId}`,{templates:[{id:'mapped-five-slide',name:'Mapped five-slide reference',mode:'slides',slides:selected}]},'PATCH');state.importPreview=preview.preview;state.importPreview.unresolved=false;return render()}if(a==='install-import'){await api(`/api/template-imports/${state.importId}/install`,{},'POST');if(state.view==='shared'){state.sharedTemplates=(await api('/api/templates/shared')).templates;toast('Shared template pack installed.')}else{state.templates=(await api(`/api/clients/${state.client.id}/templates`)).templates;toast('Template pack installed for this client.')}state.importPreview=null;state.importId='';return render()}if(a==='download-one'){const r=await fetch(artworkUrl(slide()));if(!r.ok)throw new Error('Could not load the selected artwork.');downloadBlob(await normalizePng(await r.blob()),`slide-${state.index+1}.png`);return}if(a==='clear-artwork'){slide().artworkAssetId='';slide().artworkReviewed=false;scheduleSave();return render()}if(a==='caption-tab'){state.captionTab=node.dataset.value;return render()}if(a==='export')return exportZip()}catch(err){toast(err.message)}}
-let actionPending=false;
-root.addEventListener('click',ev=>{const tab=ev.target.closest('[data-tab-target]');if(tab){state.clientTab=tab.dataset.tabTarget;document.querySelectorAll('[data-tab]').forEach(x=>x.hidden=x.dataset.tab!==tab.dataset.tabTarget);document.querySelectorAll('[data-tab-target]').forEach(x=>x.classList.toggle('active',x===tab));return}const node=ev.target.closest('[data-action]');if(node){ev.preventDefault();if(actionPending){if(state.busy&&node.dataset.action==='slide')action(node);return;}actionPending=true;Promise.resolve(action(node)).finally(()=>actionPending=false)}});
-root.addEventListener('input',ev=>{const x=ev.target;if(x.dataset.maker){state.maker[x.dataset.maker]=x.value;state.maker.results=[];if(x.dataset.maker==='provider')state.maker.model=IMAGE_MODELS[x.value]?.[0]?.[0]||'';if(x.tagName==='SELECT')render();return}if(x.id==='correction'){state.correction=x.value;return}if(x.dataset.project){if(x.dataset.project==='templateId'&&state.project.templateId!==x.value)state.project.slides=state.project.slides.map(s=>({...s,artworkAssetId:'',artworkReviewed:false}));state.project[x.dataset.project]=x.value;scheduleSave()}if(x.dataset.slide){slide()[x.dataset.slide]=x.value;slide().approved=false;slide().approvedAt='';slide().artworkAssetId='';slide().artworkReviewed=false;scheduleSave()}if(x.dataset.caption){state.project[x.dataset.caption]=x.value;scheduleSave()}});
-root.addEventListener('change',ev=>{if(ev.target.id==='shared-pack'){state.sharedPackId=ev.target.value;state.importPreview=null;state.importId='';render();return}if(ev.target.dataset.file)fileInput(ev.target);if(ev.target.dataset.generation){const key=ev.target.dataset.generation,g=state.project.generation;g[key]=ev.target.value;if(key==='provider')g.model=IMAGE_MODELS[g.provider]?.[0]?.[0]||'';if(key==='writingProvider')g.writingModel=WRITING_MODELS[g.writingProvider]?.[0]?.[0]||'';state.generationError='';scheduleSave();render();if(ev.target.value==='antigravity')refreshAgyModels().then(render).catch(err=>toast(err.message))}});
-await refreshAll();render();
+function imageControls() {
+  const g =
+    S.p.generation ||
+    (S.p.generation = {
+      provider: "openai",
+      model: "gpt-image-2",
+    });
+  const models = IMAGE_MODELS[g.provider] || [];
+  return `<div class="model-panel"><label>Image provider<select class="control" data-g="provider" ${S.busy ? "disabled" : ""}>${Object.keys(
+    IMAGE_MODELS,
+  )
+    .map(
+      (id) =>
+        `<option value="${id}" ${id === g.provider ? "selected" : ""} ${S.status.imageProviders?.[id]?.available ? "" : "disabled"}>${E(S.status.imageProviders?.[id]?.label || id)}${S.status.imageProviders?.[id]?.available ? "" : " — unavailable"}</option>`,
+    )
+    .join(
+      "",
+    )}</select></label><label>Image model<select class="control" data-g="model" ${S.busy ? "disabled" : ""}>${models.map(([id, label]) => `<option value="${id}" ${id === g.model ? "selected" : ""}>${E(label)}</option>`).join("")}</select></label></div>`;
+}
+function templateSelector() {
+  return `<div class="styles">${S.templates.map((t) => `<button class="${S.p.templateId === t.id ? "sel" : ""}" data-a="style" data-v="${t.id}" ${S.busy ? "disabled" : ""}>${img(t) ? `<img src="${img(t)}">` : "✦"}<b>${E(t.name)}</b></button>`).join("") || '<div class="empty">No compatible templates are installed for this client.</div>'}</div>`;
+}
+function languageControl() {
+  const pack = pk(S.client.businessPackId);
+  const selected =
+    S.p.language || S.p.contextSnapshot?.language || pack.defaultLanguage || "english";
+  const custom =
+    S.customLanguage ||
+    !(pack.languages || []).some((language) => language.id === selected);
+  return `<label>Language combination<select class="control" data-language-preset ${S.busy ? "disabled" : ""}>${(pack.languages || []).map((language) => `<option value="${E(language.id)}" ${!custom && language.id === selected ? "selected" : ""}>${E(language.label)}</option>`).join("")}<option value="custom" ${custom ? "selected" : ""}>Custom language or combination…</option></select></label>${custom ? `<label>Custom language instructions<input class="control" data-z="language" value="${E(S.p.language || "")}" placeholder="e.g. Hindi + English, Tamil, or Arabic + Malayalam" ${S.busy ? "disabled" : ""}></label>` : ""}<p class="muted">Headlines, supporting copy and captions will follow this language choice.</p>`;
+}
+function brief() {
+  return `<section class="card form"><span>STEP 1 OF 5</span><h2>Shape the message</h2><label>Topic</label><textarea class="control" data-z="topic" ${S.busy ? "disabled" : ""}>${E(S.p.topic)}</textarea><label>Facts and requirements <small>Optional</small></label><textarea class="control" data-z="notes" ${S.busy ? "disabled" : ""}>${E(S.p.notes || "")}</textarea><div class="suggest">${(
+    pk(S.client.businessPackId).topics || []
+  )
+    .slice(0, 5)
+    .map(
+      (x) =>
+        `<button data-a="topic" data-v="${E(x[2])}" ${S.busy ? "disabled" : ""}>${E(x[1])}</button>`,
+    )
+    .join(
+      "",
+    )}</div><h2>Choose the language</h2>${languageControl()}<h2>Choose a reference template</h2><p class="muted">The selected template guides copy length, hierarchy and visual concepts for the five-slide draft.</p>${templateSelector()}<h2>Choose the writing model</h2><p class="muted">This provider will write one coherent five-slide draft using the selected reference and language combination.</p>${writingControls()}${S.busy === "draft" ? `<div class="generation-progress" role="status"><div class="spinner"></div><div><b>Creating your five-slide draft…</b><span>Reviewing the brief, language, reference template and story before preparing slide copy.</span></div><i></i></div>` : ""}<button class="btn" data-a="starter" ${S.busy ? "disabled" : ""}>Use editable starter</button><button class="btn primary right" data-a="draft" ${S.busy || !S.p.topic.trim() || !S.p.templateId || !String(S.p.language || "").trim() ? "disabled" : ""}>${S.busy === "draft" ? "Generating draft…" : "Generate draft →"}</button></section>`;
+}
+function copy() {
+  let s = sp();
+  return `<section class="card form"><div class="slides">${S.p.slides.map((x, i) => `<button class="${S.i === i ? "on" : ""}" data-a="slide" data-v="${i}">${i + 1}<small>${x.approved ? "✓" : "Review"}</small></button>`).join("")}</div><h2>Slide ${S.i + 1}: ${E(s.role)}</h2><label>Headline<textarea class="control" data-s="heading">${E(s.heading)}</textarea></label><label>Supporting copy<textarea class="control" data-s="body">${E(s.body)}</textarea></label><label>Visual direction<textarea class="control" data-s="visualPrompt">${E(s.visualPrompt)}</textarea></label><button class="btn" data-a="revise">Rewrite with AI</button><button class="btn primary right" data-a="approve">${s.approved ? "Reopen approval" : "Approve & continue →"}</button><p class="muted">${ap()}/5 approved. ${ap() === 5 ? "Choose an image model when ready." : "Editing an approved slide reopens its review."}</p></section>`;
+}
+function design() {
+  let s = sp();
+  const progress = S.imageProgress;
+  const progressPercent = progress
+    ? Math.round((progress.completed / Math.max(1, progress.total)) * 100)
+    : 0;
+  return `<section class="card form"><span>STEP 3 OF 5</span><h2>Choose the image model</h2><p class="muted">Select the provider and model used to turn the approved copy into artwork.</p>${imageControls()}<h2>Generate artwork</h2><p class="muted">Using <b>${E(S.templates.find((t) => t.id === S.p.templateId)?.name || "the selected reference")}</b>. ${ap() === 5 ? "Your copy is approved. Generate all five slides, then inspect each one." : `Approve ${5 - ap()} more slides first.`}</p>${progress ? `<div class="generation-progress" role="status" aria-live="polite"><div class="spinner"></div><div><b>${progress.total === 1 ? `Creating slide ${S.i + 1}…` : `Creating carousel artwork… ${progress.completed}/${progress.total}`}</b><span>${progress.active ? `${progress.active} image${progress.active === 1 ? "" : "s"} generating now. ` : ""}${progress.failed ? `${progress.failed} failed. ` : ""}You can leave this screen open while generation finishes.</span></div><i class="determinate" style="width:${progressPercent}%"></i></div>` : ""}<button class="btn" data-a="one" ${S.busy || !s.approved || !S.p.templateId ? "disabled" : ""}>${S.busy === "image" ? "Generating slide…" : s.artworkAssetId ? "Regenerate selected" : "Generate selected"}</button>${im() === 5 ? `<button class="btn primary right" data-a="go-review" ${S.busy ? "disabled" : ""}>Go to review →</button>` : `<button class="btn primary right" data-a="all" ${S.busy || ap() !== 5 || !S.p.templateId ? "disabled" : ""}>${S.busy === "images" ? `Generating ${progress?.completed || 0}/${progress?.total || 5}…` : "Generate all 5 slides →"}</button>`}</section>`;
+}
+const art = (s) =>
+  s.artworkAssetId
+    ? `<img class="art" src="/api/clients/${S.client.id}/assets/${s.artworkAssetId}">`
+    : `<div class="art empty">Generate this slide first.</div>`;
+function review() {
+  let s = sp();
+  const allReady = im() === 5;
+  return `<section class="card form"><div class="review-toolbar"><p><b>${rv()}/5 reviewed</b><span>${allReady ? "Approve the complete carousel at once, or inspect each slide." : "Generate every slide before approving the full carousel."}</span></p><button class="btn" data-a="approve-all" ${S.busy || !allReady || rv() === 5 ? "disabled" : ""}>Approve all</button></div><div class="thumbs">${S.p.slides.map((x, i) => `<button class="${S.i === i ? "on" : ""}" data-a="slide" data-v="${i}">${x.artworkAssetId ? `<img src="/api/clients/${S.client.id}/assets/${x.artworkAssetId}">` : i + 1}<small>${x.artworkReviewed ? "✓ Reviewed" : "Check"}</small></button>`).join("")}</div><div class="review">${art(s)}<div><span>SLIDE ${S.i + 1} REVIEW</span><h2>Check the final details.</h2><b>${E(s.heading)}</b><p>${E(s.body)}</p>${["Text matches approved copy", "Brand details are correct", "Image is relevant and polished", "Nothing is cut off"].map((x) => `<label class="check"><input type="checkbox" ${s.artworkReviewed ? "checked" : ""}>${x}</label>`).join("")}<div class="regenerate"><label>What should change? <small>Optional</small><textarea class="control" data-regeneration-note placeholder="e.g. Make the image brighter and give the headline more space" ${S.busy ? "disabled" : ""}>${E(S.regenerationNotes[S.i] || "")}</textarea></label></div><div class="review-actions"><button class="btn primary" data-a="review" ${S.busy || !s.artworkAssetId ? "disabled" : ""}>${s.artworkReviewed ? "Reopen review" : "Looks good →"}</button><button class="btn" data-a="regenerate" ${S.busy || !s.artworkAssetId ? "disabled" : ""}>${S.busy === "image" ? "Regenerating…" : "Regenerate"}</button></div></div></div></section>`;
+}
+function exportPage() {
+  let ok = ap() === 5 && im() === 5 && rv() === 5;
+  return `<section class="card export"><span>FINAL STEP</span><h1>${ok ? "Ready to publish." : "Almost there."}</h1><p>${ap()}/5 copy approved · ${im()}/5 images ready · ${rv()}/5 reviewed</p><button class="btn primary big" data-a="export" ${ok ? "" : "disabled"}>Download carousel ZIP ↓</button></section>`;
+}
+async function save() {
+  let p = S.p,
+    r = await api(
+      `/api/clients/${S.client.id}/projects/${p.id}`,
+      {
+        expectedRevision: p.revision,
+        topic: p.topic,
+        notes: p.notes,
+        language: p.language,
+        stage: p.stage,
+        templateId: p.templateId,
+        slides: p.slides,
+        generation: p.generation,
+      },
+      "PATCH",
+    );
+  S.p = r.project;
+}
+let timer;
+const later = () => {
+  clearTimeout(timer);
+  timer = setTimeout(() => save().catch((e) => toast(e.message)), 500);
+};
+async function job(stage, extra = {}) {
+  S.busy = stage;
+  if (stage === "image")
+    S.imageProgress = { completed: 0, total: 1, active: 1, failed: 0 };
+  render();
+  try {
+    await save();
+    let g = S.p.generation || {},
+      r = await api(`/api/clients/${S.client.id}/projects/${S.p.id}/jobs`, {
+        stage,
+        provider: stage === "image" ? g.provider : g.writingProvider,
+        model: stage === "image" ? g.model : g.writingModel,
+        ...extra,
+        idempotencyKey: crypto.randomUUID(),
+      });
+    if (r.project) S.p = r.project;
+    if (stage === "image") S.imageProgress.completed = 1;
+    toast(stage === "image" ? "Slide artwork is ready to review." : "Ready for review.");
+  } catch (e) {
+    toast(e.message);
+  } finally {
+    S.busy = "";
+    S.imageProgress = null;
+    render();
+  }
+}
+async function act(n) {
+  try {
+    let a = n.dataset.a;
+    if (a === "nav") {
+      S.view = n.dataset.v;
+      S.client = S.p = null;
+      await load();
+      return render();
+    }
+    if (a === "client") return client(n.dataset.id);
+    if (a === "open") {
+      await client(n.dataset.c);
+      return project(n.dataset.id);
+    }
+    if (a === "form") {
+      S.form = !S.form;
+      return render();
+    }
+    if (a === "add") {
+      let name = document.querySelector("#name").value;
+      if (!name) throw Error("Add a business name first.");
+      let r = await api("/api/clients", {
+        name,
+        businessPackId: document.querySelector("#pack").value,
+      });
+      await load();
+      return client(r.client.id);
+    }
+    if (a === "goal") {
+      S.create.goal = n.dataset.v;
+      return render();
+    }
+    if (a === "new" || a === "create-client") {
+      if (a === "create-client") {
+        S.create.clientId = S.client.id;
+        S.view = "create";
+        return render();
+      }
+      await client(S.create.clientId);
+      let r = await api(`/api/clients/${S.client.id}/projects`, {});
+      S.p = r.project;
+      S.p.topic = S.create.topic;
+      S.p.notes = `Goal: ${S.create.goal}\n${S.create.facts}`;
+      await save();
+      S.view = "studio";
+      return render();
+    }
+    if (a === "tab") {
+      S.tab = n.dataset.v;
+      return render();
+    }
+    if (a === "confirm-design") {
+      const images = (S.import.images || []).slice(0, 5);
+      if (images.length !== 5)
+        throw Error(
+          "This package must contain exactly five slide images or a valid manifest.",
+        );
+      const r = await api(
+        `/api/template-imports/${S.importId}`,
+        {
+          templates: [
+            {
+              id: "mapped-five-slide",
+              name: "Imported five-slide style",
+              mode: "slides",
+              slides: images.map((image, i) => ({
+                position: i + 1,
+                image: image.name,
+              })),
+            },
+          ],
+        },
+        "PATCH",
+      );
+      S.import = r.preview;
+      S.import.unresolved = false;
+      toast("Slide order confirmed. Review and install the package.");
+      return render();
+    }
+    if (a === "install-design") {
+      await api(`/api/template-imports/${S.importId}/install`, {}, "POST");
+      S.templates = (
+        await api(`/api/clients/${S.client.id}/templates`)
+      ).templates;
+      S.import = null;
+      S.importId = "";
+      toast("Design package installed for this client.");
+      return render();
+    }
+    if (a === "save") {
+      let b = { ...S.client.brand },
+        p = { ...S.client.profile };
+      document
+        .querySelectorAll("[data-b]")
+        .forEach((x) => (b[x.dataset.b] = x.value));
+      document
+        .querySelectorAll("[data-p]")
+        .forEach((x) => (p[x.dataset.p] = x.value));
+      S.client = (
+        await api(
+          `/api/clients/${S.client.id}`,
+          {
+            expectedRevision: S.client.revision,
+            name: b.name || S.client.name,
+            brand: b,
+            profile: p,
+          },
+          "PATCH",
+        )
+      ).client;
+      toast("Brand kit saved.");
+      return render();
+    }
+    if (a === "back") {
+      S.view = "client";
+      S.tab = "projects";
+      return client(S.client.id);
+    }
+    if (a === "stage") {
+      S.p.stage = +n.dataset.v;
+      later();
+      return render();
+    }
+    if (a === "go-review") {
+      S.p.stage = 3;
+      later();
+      return render();
+    }
+    if (a === "topic") {
+      S.p.topic = n.dataset.v;
+      later();
+      return render();
+    }
+    if (a === "starter") {
+      S.p.slides = starterSlides(S.p.topic).map((x, i) => ({
+        ...S.p.slides[i],
+        ...x,
+      }));
+      S.p.stage = 1;
+      later();
+      return render();
+    }
+    if (a === "draft") return job("draft");
+    if (a === "slide") {
+      S.i = +n.dataset.v;
+      return render();
+    }
+    if (a === "approve") {
+      let s = sp();
+      s.approved = !s.approved;
+      if (!s.approved) {
+        s.artworkAssetId = "";
+        s.artworkReviewed = false;
+      } else if (S.i < 4) S.i++;
+      later();
+      return render();
+    }
+    if (a === "revise")
+      return job("revise", {
+        slideIndex: S.i,
+        correction: "Make this clearer and more engaging.",
+      });
+    if (a === "style") {
+      S.p.templateId = n.dataset.v;
+      S.p.slides.forEach((x) => {
+        x.artworkAssetId = "";
+        x.artworkReviewed = false;
+      });
+      later();
+      return render();
+    }
+    if (a === "one") return job("image", { slideIndex: S.i });
+    if (a === "all") {
+      S.busy = "images";
+      const ids = S.p.slides
+        .map((x, i) => (x.artworkAssetId ? null : i))
+        .filter((x) => x !== null);
+      S.imageProgress = {
+        completed: 0,
+        total: ids.length,
+        active: 0,
+        failed: 0,
+      };
+      render();
+      try {
+        await save();
+        const g = S.p.generation;
+        const batch = await runConcurrent(
+          ids,
+          3,
+          (i) =>
+            api(`/api/clients/${S.client.id}/projects/${S.p.id}/jobs`, {
+              stage: "image",
+              provider: g.provider,
+              model: g.model,
+              slideIndex: i,
+              idempotencyKey: crypto.randomUUID(),
+            }),
+          {
+            onStart: ({ active }) => {
+              S.imageProgress.active = active;
+              render();
+            },
+            onComplete: ({ active, completed, result }) => {
+              S.imageProgress.active = active;
+              S.imageProgress.completed = completed;
+              if (result.status === "rejected") S.imageProgress.failed++;
+              render();
+            },
+          },
+        );
+        S.p = (
+          await api(`/api/clients/${S.client.id}/projects/${S.p.id}`)
+        ).project;
+        const failed = batch.results.filter(
+          (result) => result.status === "rejected",
+        ).length;
+        toast(
+          failed
+            ? `${ids.length - failed} image${ids.length - failed === 1 ? "" : "s"} ready; ${failed} failed. Retry to generate the missing slides.`
+            : "All artwork is ready to review.",
+        );
+      } finally {
+        S.busy = "";
+        S.imageProgress = null;
+      }
+      return render();
+    }
+    if (a === "review") {
+      let s = sp();
+      s.artworkReviewed = !s.artworkReviewed;
+      if (s.artworkReviewed && S.i < 4) S.i++;
+      later();
+      return render();
+    }
+    if (a === "approve-all") {
+      S.p.slides.forEach((slide) => {
+        if (slide.artworkAssetId) slide.artworkReviewed = true;
+      });
+      later();
+      toast("All five slides are approved.");
+      return render();
+    }
+    if (a === "regenerate") {
+      const slideIndex = S.i;
+      const correction = String(S.regenerationNotes[slideIndex] || "").trim();
+      await job("image", { slideIndex, correction });
+      delete S.regenerationNotes[slideIndex];
+      return render();
+    }
+    if (a === "export") {
+      let f = [];
+      for (let i = 0; i < 5; i++) {
+        let r = await fetch(
+          `/api/clients/${S.client.id}/assets/${S.p.slides[i].artworkAssetId}`,
+        );
+        f.push({
+          name: `slide-${i + 1}.png`,
+          data: new Uint8Array(await r.arrayBuffer()),
+        });
+      }
+      f.push({
+        name: "project.json",
+        data: new TextEncoder().encode(JSON.stringify(S.p)),
+      });
+      downloadBlob(
+        new Blob([makeZip(f)], { type: "application/zip" }),
+        "carousel.zip",
+      );
+      toast("Your carousel ZIP is downloading.");
+    }
+  } catch (e) {
+    toast(e.message);
+  }
+}
+root.onclick = (e) => {
+  let n = e.target.closest("[data-a]");
+  if (n) {
+    e.preventDefault();
+    act(n);
+  }
+};
+root.oninput = (e) => {
+  let x = e.target;
+  if (x.dataset.regenerationNote !== undefined) {
+    S.regenerationNotes[S.i] = x.value;
+    return;
+  }
+  if (x.dataset.x) S.create[x.dataset.x] = x.value;
+  if (x.dataset.z) {
+    S.p[x.dataset.z] = x.value;
+    later();
+    if (x.dataset.z === "language") {
+      const draft = document.querySelector('[data-a="draft"]');
+      if (draft)
+        draft.disabled =
+          Boolean(S.busy) ||
+          !S.p.topic.trim() ||
+          !S.p.templateId ||
+          !String(S.p.language || "").trim();
+    }
+  }
+  if (x.dataset.s) {
+    let s = sp();
+    s[x.dataset.s] = x.value;
+    s.approved = false;
+    s.artworkAssetId = "";
+    s.artworkReviewed = false;
+    later();
+  }
+};
+root.onchange = async (e) => {
+  const x = e.target;
+  try {
+    if (x.dataset.languagePreset !== undefined) {
+      if (x.value === "custom") {
+        S.customLanguage = true;
+        S.p.language = "";
+        return render();
+      }
+      S.customLanguage = false;
+      S.p.language = x.value;
+      later();
+      return render();
+    }
+    if (x.dataset.g) {
+      const g = S.p.generation || (S.p.generation = {});
+      g[x.dataset.g] = x.value;
+      if (x.dataset.g === "writingProvider")
+        g.writingModel = WRITING_MODELS[x.value]?.[0]?.[0] || "";
+      if (x.dataset.g === "provider")
+        g.model = IMAGE_MODELS[x.value]?.[0]?.[0] || "";
+      later();
+      render();
+    }
+    if (x.dataset.file === "design-package" && x.files?.[0]) {
+      const file = x.files[0];
+      if (!file.name.toLowerCase().endsWith(".zip"))
+        throw Error("Choose a ZIP design package.");
+      S.import = {
+        kind: "Uploading package",
+        message: "Validating images, structure and compatibility…",
+      };
+      render();
+      const r = await api(
+        `/api/template-imports?clientId=${encodeURIComponent(S.client.id)}&businessPackId=${encodeURIComponent(S.client.businessPackId)}&scope=client`,
+        await file.arrayBuffer(),
+        "POST",
+        true,
+      );
+      S.importId = r.id;
+      S.import = r.preview;
+      toast("Design package validated.");
+      render();
+    }
+  } catch (error) {
+    S.import = null;
+    toast(error.message);
+    render();
+  }
+};
+await load();
+render();

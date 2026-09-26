@@ -8,6 +8,12 @@ const visualGuidance = {
   general: 'Use imagery relevant to the supplied products, services and audience. Do not introduce a different industry or unsupported product features.',
 };
 
+const languageGuidance = {
+  english: 'Write all audience-facing copy in clear English.',
+  malayalam: 'Write audience-facing copy in natural Malayalam. Keep only unavoidable brand names or technical terms in English.',
+  'malayalam-english': 'Use a natural Malayalam + English combination: Malayalam-led conversational copy with familiar English terms where they improve clarity. Do not translate brand names.',
+};
+
 export function selectedReferenceContext(template, businessPackId) {
   if (!template) return null;
   if (template.businessPackId && template.businessPackId !== businessPackId) {
@@ -27,7 +33,7 @@ export function businessPromptContext(context, reference, { stage = 'writing', s
     'BUSINESS AND DESIGN CONTEXT (client facts govern content; references govern presentation):',
     `Business type: ${clean(context.businessPack?.name, 100)} (${clean(context.businessPack?.id, 40)}).`,
     `Services, audience, specialty and supplied facts: ${JSON.stringify(context.business || {}).slice(0, 8000)}`,
-    `Language: ${clean(context.language, 80)}. Tone: ${clean(context.tone, 300)}.`,
+    `Language: ${clean(context.language, 80)}. ${languageGuidance[context.language] || `Follow this requested language or language combination exactly: ${clean(context.language, 80)}.`} Tone: ${clean(context.tone, 300)}.`,
     `Five-slide roles: ${(context.recipe?.roles || []).join(' → ')}.`,
     `Industry visual direction: ${visualGuidance[context.businessPack?.id] || visualGuidance.general}`,
     `Required factual restrictions: ${(context.contentRules || []).join(' ')}`,

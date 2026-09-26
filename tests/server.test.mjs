@@ -37,6 +37,11 @@ test('image prompt uses approved copy, clinic identity and brand colors exactly'
   assert.match(prompt, /primary "#112233", accent "#abcdef"/);
   assert.match(prompt, /Do not translate, transliterate, rewrite/);
 });
+test('image regeneration instructions are added without relaxing approved-copy rules', () => {
+  const prompt = buildSlideImagePrompt({ slideNumber: 1, correction: 'Use a brighter background and more whitespace.', slide: { role: 'Hook', heading: 'Exact heading', body: 'Exact body' }, brand: { name: 'Example Dental' } });
+  assert.match(prompt, /REGENERATION REQUEST:.*brighter background and more whitespace/);
+  assert.match(prompt, /Use the approved content exactly as written/);
+});
 test('provider response parser handles Antigravity envelopes and explanatory text', () => {
   const draft = { slides: Array.from({ length: 5 }, () => ({ heading: 'H', body: 'B', visualPrompt: 'V' })), instagram: 'I', youtubeTitle: 'Y', youtubeDescription: 'D' };
   assert.deepEqual(parseJsonResponse(JSON.stringify({ status: 'SUCCESS', response: 'extra text', structured_output: draft }), 'Antigravity CLI'), draft);
