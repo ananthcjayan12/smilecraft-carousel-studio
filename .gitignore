@@ -5,3 +5,4 @@ storage/
 *.log
 .playwright-cli/
 output/playwright/
+src-tauri/target/\n
