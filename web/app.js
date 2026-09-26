@@ -197,14 +197,19 @@ function library() {
   return `<div class="intro"><span>LIBRARY</span><h1>Styles and creative references.</h1><p>Shared styles are available to compatible client types.</p></div>${styles(S.shared)}`;
 }
 function settings() {
-  return `<div class="intro"><span>SETTINGS</span><h1>Workspace settings.</h1><p>Technical setup stays here, away from your creative work.</p></div><section class="card form"><h2>Generation providers</h2>${Object.entries(
-    S.status.textProviders || {},
-  )
-    .map(
-      ([k, v]) =>
-        `<p class="provider">${E(v.label || k)} <b>${v.available ? "Ready" : "Not connected"}</b></p>`,
-    )
-    .join("")}</section>`;
+  const apiProviders = [
+    ["openai", "OpenAI API"],
+    ["gemini", "Gemini API"],
+    ["claude", "Claude API"],
+  ];
+  const cli = S.status.cli || {};
+  return `<div class="intro"><span>SETTINGS</span><h1>Workspace settings.</h1><p>Your API keys stay in this computer's secure credential store and are never sent to Carousel Studio servers.</p></div>
+  <section class="card form"><h2>Bring your own AI</h2><p class="muted">Add only the providers you want to use. Keys are stored by macOS Keychain / Windows Credential Manager.</p>
+  ${apiProviders.map(([id,label]) => `<div class="provider-key"><div><b>${label}</b><small>${S.status.textProviders?.[id]?.available ? "Connected" : "Not connected"}</small></div><input id="key-${id}" class="control" type="password" autocomplete="off" placeholder="Paste API key"><button class="btn primary" data-a="save-key" data-provider="${id}">Save</button><button class="btn" data-a="remove-key" data-provider="${id}">Remove</button></div>`).join("")}</section>
+  <section class="card form"><h2>Advanced local tools</h2>
+  <p class="provider">Codex CLI <b>${cli.codex?.installed ? (cli.codex?.authenticated ? "Ready" : "Login required") : "Not installed"}</b><small>${E(cli.codex?.version || "")}</small></p>
+  <p class="provider">Antigravity CLI <b>${cli.antigravity?.installed ? "Detected" : "Not installed"}</b><small>${E(cli.antigravity?.version || "")}</small></p>
+  <p class="muted">CLI tools are optional and are not bundled with Carousel Studio.</p></section>`;
 }
 function render() {
   let content =
@@ -369,6 +374,23 @@ async function job(stage, extra = {}) {
 async function act(n) {
   try {
     let a = n.dataset.a;
+    if (a === "save-key") {
+      const provider = n.dataset.provider;
+      const input = document.querySelector(`#key-${provider}`);
+      const key = String(input?.value || "").trim();
+      if (!key) throw Error("Paste the API key first.");
+      await api(`/api/desktop/credentials/${provider}`, { key });
+      await load();
+      toast("API key saved securely on this device.");
+      return render();
+    }
+    if (a === "remove-key") {
+      const provider = n.dataset.provider;
+      await api(`/api/desktop/credentials/${provider}`, {}, "DELETE");
+      await load();
+      toast("API key removed from this device.");
+      return render();
+    }
     if (a === "nav") {
       S.view = n.dataset.v;
       S.client = S.p = null;
@@ -631,10 +653,7 @@ async function act(n) {
         name: "project.json",
         data: new TextEncoder().encode(JSON.stringify(S.p)),
       });
-      downloadBlob(
-        new Blob([makeZip(f)], { type: "application/zip" }),
-        "carousel.zip",
-      );
+      downloadBlob(await makeZip(f), "carousel.zip");
       toast("Your carousel ZIP is downloading.");
     }
   } catch (e) {
