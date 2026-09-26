@@ -48,7 +48,7 @@ jobs:
         shell: bash
         run: |
           cargo tree --manifest-path src-tauri/Cargo.toml -i tao | tee /tmp/tao-tree.txt
-          grep -q "tao v0.34.5" /tmp/tao-tree.txt
+          grep -q "tao v0.34.8" /tmp/tao-tree.txt
           if grep -q "tao v0.35.3" /tmp/tao-tree.txt; then
             echo "Broken macOS 26 tao runtime resolved unexpectedly."
             exit 1
