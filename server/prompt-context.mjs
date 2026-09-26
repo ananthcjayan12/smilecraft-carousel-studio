@@ -2,7 +2,7 @@ const clean = (value, max = 4000) => String(value ?? '').slice(0, max);
 
 const visualGuidance = {
   dental: 'Use calm dental education, clinically plausible tooth/anatomy illustrations and appropriate oral-care imagery. Avoid frightening treatment scenes and unsupported before/after results.',
-  tour: 'Use destination, itinerary and travel-planning imagery tied to supplied destinations. Do not depict an unidentified hotel, attraction or amenity as included in the package.',
+  tour: 'Use destination, itinerary and travel-planning imagery tied to supplied destinations. If the client supplies an itinerary, create an attractive route map and make the route, stop order and geographic placement as accurate as possible using only the supplied itinerary. Do not depict an unidentified hotel, attraction or amenity as included in the package.',
   salon: 'Use salon services, styling, realistic beauty details and after-care imagery. Do not imply fabricated client transformations or guaranteed results.',
   construction: 'Use architecture, planning, construction process and verified project imagery. Concept illustrations must not be presented as the business’s completed projects.',
   general: 'Use imagery relevant to the supplied products, services and audience. Do not introduce a different industry or unsupported product features.',
