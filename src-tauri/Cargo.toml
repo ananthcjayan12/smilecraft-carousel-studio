@@ -10,7 +10,8 @@ tauri-build = { version = "=2.5.6", features = [] }
 
 [dependencies]
 tauri = { version = "=2.9.5", features = [] }
-tauri-runtime-wry = "=2.9.3" # force tao 0.34.5; avoids current macOS 26 tao 0.35.3 startup abort
+tauri-runtime-wry = "=2.9.3" # stay on pre-tao-0.35 runtime
+tao = "=0.34.8" # exact macOS-26-safe window runtime; avoid tao 0.35.3 startup abort
 tauri-plugin-updater = "=2.9.0"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
