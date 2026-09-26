@@ -1,0 +1,27 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "Carousel Studio",
+  "version": "0.1.0",
+  "identifier": "com.carouselstudio.desktop",
+  "build": {
+    "frontendDist": "../web"
+  },
+  "app": {
+    "windows": [],
+    "security": {
+      "csp": null
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": ["dmg", "nsis"],
+    "category": "GraphicsAndDesign",
+    "shortDescription": "Create AI social carousels with your own AI accounts.",
+    "longDescription": "A lightweight local-first carousel creation studio. Projects and AI credentials stay on the customer's device."
+  },
+  "plugins": {
+    "updater": {
+      "active": false
+    }
+  }
+}
