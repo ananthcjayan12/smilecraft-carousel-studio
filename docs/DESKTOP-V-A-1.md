@@ -35,7 +35,7 @@ The CI artifacts are intentionally unsigned developer builds. For public distrib
 
 ## OTA updates
 
-Tauri's updater dependency is included but disabled in the default config until a production updater public key and HTTPS update manifest are configured. Do not enable unsigned updates. When the signing key and endpoint are ready, set the updater config and publish signed updater artifacts from the release workflow.
+OTA updates are intentionally **not included in v.a.1**. The updater plugin is omitted entirely so an unset updater configuration cannot affect application startup. When a production HTTPS update endpoint and signing key are ready, add the updater plugin back together with a valid signed configuration and release artifacts.
 
 ## Development
 
