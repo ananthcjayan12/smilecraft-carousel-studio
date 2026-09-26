@@ -10,6 +10,22 @@ Projects pin a serialized client/business context snapshot. Updating a client do
 
 Template references can be client-private or shared. The ZIP importer accepts STORE or DEFLATE archives, optional `pack.json`, exactly-five-image archives, legacy SmileCraft master boards, staged mapping, versions and safety limits. See `docs/PACKING-GUIDE.md` or download the guide/example archive from Shared Templates in the app.
 
+## Lightweight desktop build (v.a.1)
+
+The `v.a.1` branch adds a single-install Tauri desktop edition for macOS and Windows. It deliberately does **not** bundle Electron/Chromium, Node.js or Python. The existing web UI runs inside the operating system webview while a small Rust core owns local SQLite, files, secure credentials and optional CLI execution.
+
+Desktop commands:
+
+```sh
+npm install
+npm run desktop:dev
+npm run desktop:build
+```
+
+Customer AI credentials are stored in the operating system credential vault and provider calls use the customer's own accounts. Codex/Antigravity are optional advanced integrations and are not bundled with the application.
+
+GitHub Actions in `.github/workflows/desktop-build.yml` produce a universal macOS DMG and Windows NSIS EXE. `.github/workflows/desktop-release.yml` is the release path and accepts Apple signing/notarization secrets for customer-ready macOS builds. See `docs/DESKTOP-V-A-1.md` for architecture, signing and updater notes.
+
 ## Install and run
 
 Requirements: Node.js 20 or newer.
