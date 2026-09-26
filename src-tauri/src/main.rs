@@ -677,7 +677,6 @@ fn router(state:AppState)->Router{
 
 fn main() {
     tauri::Builder::default()
-        .plugin(tauri_plugin_updater::Builder::new().build())
         .setup(|app| {
             let root=app.path().app_data_dir()?.join("workspace");
             let state=init_state(root).map_err(|e|std::io::Error::other(e.message))?;
