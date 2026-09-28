@@ -97,23 +97,33 @@ async function generateImage(env, job, project, clientId) {
   const item = project.slides[job.slide_index], context = project.contextSnapshot || {};
   const prompt = `Create one complete 4:5 social carousel slide in the style of the attached reference. Render this approved text exactly and legibly: headline ${JSON.stringify(item.heading)}, body ${JSON.stringify(item.body)}. Visual idea: ${limit(item.visualPrompt, 550)}. Brand: ${JSON.stringify(context.brand || {}).slice(0, 1000)}. Requested visual change: ${limit(job.correction, 500)}. No extra text, invented claims, contact details or watermarks.`;
   const template = builtinTemplate(project.templateId);
-  if (!template || template.businessPackId !== project.businessPackId) throw error('The selected reference is unavailable.', 400);
-  const referencePath = template.data.slides[job.slide_index].staticPath;
-  const reference = await env.STATIC.fetch(new Request(new URL(referencePath, env.APP_ORIGIN)));
-  if (!reference.ok) throw error('Reference image is unavailable.', 503);
+  const selected = template || await env.DB.prepare('SELECT * FROM templates WHERE id=? AND account_id=? AND client_id=?').bind(project.templateId, job.account_id, clientId).first();
+  if (!selected || (selected.businessPackId || selected.business_pack_id) !== project.businessPackId) throw error('The selected reference is unavailable.', 400);
+  const data = template?.data || JSON.parse(selected.data_json);
+  const ref = (template?.mode || selected.mode) === 'slides' ? data.slides[job.slide_index] : data.cropPaths ? { staticPath: data.cropPaths[job.slide_index] } : data;
+  let referenceBytes, referenceMime;
+  if (ref.staticPath) {
+    const response = await env.STATIC.fetch(new Request(new URL(ref.staticPath, env.APP_ORIGIN)));
+    if (!response.ok) throw error('Reference image is unavailable.', 503);
+    referenceBytes = await response.arrayBuffer(); referenceMime = response.headers.get('content-type')?.split(';')[0] || (ref.staticPath.endsWith('.png') ? 'image/png' : 'image/jpeg');
+  } else {
+    const asset = await assetBytes(env, job.account_id, clientId, ref.assetId);
+    if (!asset) throw error('Reference image is unavailable.', 503);
+    referenceBytes = asset.bytes; referenceMime = asset.mime;
+  }
   let image;
   if (job.provider === 'openai') {
     const form = new FormData();
     form.append('model', job.model_id); form.append('prompt', prompt); form.append('size', '1024x1536'); form.append('quality', 'medium'); form.append('output_format', 'png');
-    form.append('image[]', new Blob([await reference.arrayBuffer()], { type: 'image/jpeg' }), 'reference.jpg');
+    form.append('image[]', new Blob([referenceBytes], { type: referenceMime }), 'reference');
     const logoId = context.brand?.logoAssetId;
     if (logoId) { const logo = await assetBytes(env, job.account_id, clientId, logoId); if (logo) form.append('image[]', new Blob([logo.bytes], { type: logo.mime }), 'logo'); }
     const data = await providerJson('https://api.openai.com/v1/images/edits', { method: 'POST', headers: { Authorization: `Bearer ${env.OPENAI_API_KEY}` }, body: form });
     image = { base64: data.data?.[0]?.b64_json, mime: 'image/png' };
   } else {
-    const bytes = new Uint8Array(await reference.arrayBuffer());
+    const bytes = new Uint8Array(referenceBytes);
     let base64 = ''; for (let i = 0; i < bytes.length; i += 8190) base64 += btoa(String.fromCharCode(...bytes.slice(i, i + 8190)));
-    const data = await providerJson('https://generativelanguage.googleapis.com/v1beta/interactions', { method: 'POST', headers: { 'x-goog-api-key': env.GEMINI_API_KEY, 'Content-Type': 'application/json' }, body: JSON.stringify({ model: job.model_id, input: [{ type: 'text', text: prompt }, { type: 'image', mime_type: 'image/jpeg', data: base64 }], response_format: { type: 'image', mime_type: 'image/png', aspect_ratio: '4:5', image_size: '2K' } }) });
+    const data = await providerJson('https://generativelanguage.googleapis.com/v1beta/interactions', { method: 'POST', headers: { 'x-goog-api-key': env.GEMINI_API_KEY, 'Content-Type': 'application/json' }, body: JSON.stringify({ model: job.model_id, input: [{ type: 'text', text: prompt }, { type: 'image', mime_type: referenceMime, data: base64 }], response_format: { type: 'image', mime_type: 'image/png', aspect_ratio: '4:5', image_size: '2K' } }) });
     image = findImage(data);
   }
   if (!image?.base64) throw error('The provider returned no artwork.', 502);

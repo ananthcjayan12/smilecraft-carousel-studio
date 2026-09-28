@@ -1,6 +1,7 @@
 import { publicBusinessPacks, getBusinessPack, resolveBusinessContext, starterSlidesForPack } from '../server/business-packs.mjs';
 import { repairGeneration } from '../web/studio-controls.js';
 import { runJob } from './generation.mjs';
+import { templateImportRoute } from './template-import.mjs';
 
 const now = () => new Date().toISOString();
 const parse = (value, fallback = {}) => { try { return JSON.parse(value); } catch { return fallback; } };
@@ -8,7 +9,8 @@ const json = (value, status = 200) => Response.json(value, { status, headers: { 
 const bad = (message, status = 400) => json({ error: message }, status);
 const builtin = [
   ...['dental', 'tour', 'salon', 'construction', 'general'].map(id => ({ id: `builtin:${id}:neutral:1.0.0`, clientId: null, name: 'Modern Teal', businessPackId: id, mode: 'slides', data: { slides: Array.from({ length: 5 }, (_, i) => ({ position: i + 1, staticPath: '/assets/teal-editorial.jpg' })) } })),
-  ...[['friendly', 'Friendly Clinic', 'friendly-clinic.jpg'], ['clean', 'Clinical Clean', 'clinical-clean.jpg'], ['premium', 'Premium Dark', 'premium-dark.jpg']].map(([id, name, file]) => ({ id: `builtin:dental:${id}:1.0.0`, clientId: null, name, businessPackId: 'dental', mode: 'slides', data: { slides: Array.from({ length: 5 }, (_, i) => ({ position: i + 1, staticPath: `/assets/${file}` })) } }))
+  ...[['friendly', 'Friendly Clinic', 'friendly-clinic.jpg'], ['clean', 'Clinical Clean', 'clinical-clean.jpg'], ['premium', 'Premium Dark', 'premium-dark.jpg']].map(([id, name, file]) => ({ id: `builtin:dental:${id}:1.0.0`, clientId: null, name, businessPackId: 'dental', mode: 'slides', data: { slides: Array.from({ length: 5 }, (_, i) => ({ position: i + 1, staticPath: `/assets/${file}` })) } })),
+  ...[['teal-editorial-pro', .205, .744], ['clinical-white', .205, .752], ['warm-ivory', .064, .811], ['deep-teal-premium', .181, .848], ['mint-friendly', .158, .864], ['airy-aqua', .160, .824], ['kids-mint', .177, .866], ['nature-sage', .172, .826], ['warm-clinical', .205, .915], ['premium-charcoal', .163, .736]].map(([id, top, bottom]) => ({ id: `builtin:dental:legacy:${id}:1.0.0`, clientId: null, name: id.replaceAll('-', ' '), businessPackId: 'dental', mode: 'board', data: { staticPath: `/assets/design-systems/${id}.png`, cropPaths: Array.from({ length: 5 }, (_, i) => `/assets/design-systems/crops/${id}-${i + 1}.jpg`), crops: Array.from({ length: 5 }, (_, i) => ({ position: i + 1, top, bottom, left: .006, right: .006, gap: .005 })) } }))
 ];
 export function builtinTemplate(id) { return builtin.find(item => item.id === id) || null; }
 const clientView = row => row && ({ id: row.id, name: row.name, businessPackId: row.business_pack_id, revision: row.revision, archived: Boolean(row.archived), profile: parse(row.profile_json), brand: parse(row.brand_json), createdAt: row.created_at, updatedAt: row.updated_at });
@@ -90,13 +92,16 @@ export async function apiRoute(request, env, viewer, url) {
       first(env.DB, 'SELECT COUNT(*) n FROM projects WHERE account_id=? AND archived=0', accountId),
       first(env.DB, "SELECT COUNT(*) n FROM generation_jobs WHERE account_id=? AND status IN ('queued','running')", accountId)
     ]);
-    return json({ clients: clients.n, projects: projects.n, review: 0, running: jobs.n });
+    const rows = await all(env.DB, 'SELECT project_json FROM projects WHERE account_id=? AND archived=0', accountId);
+    const review = rows.filter(row => parse(row.project_json).slides?.some(slide => slide.artworkAssetId && !slide.artworkReviewed)).length;
+    return json({ clients: clients.n, projects: projects.n, review, running: jobs.n });
   }
   if (url.pathname === '/api/all-projects' && method === 'GET') {
     const rows = await all(env.DB, 'SELECT p.*,c.name AS client_name FROM projects p JOIN clients c ON c.id=p.client_id AND c.account_id=p.account_id WHERE p.account_id=? AND p.archived=0 ORDER BY p.updated_at DESC', accountId);
     return json({ projects: rows.map(row => ({ ...projectView(row), clientName: row.client_name })) });
   }
   if (url.pathname === '/api/templates/shared' && method === 'GET') return json({ templates: builtin });
+  if (parts[0] === 'api' && parts[1] === 'template-imports') return templateImportRoute(request, env, accountId, url);
   if (url.pathname === '/api/clients' && method === 'GET') return json({ clients: (await all(env.DB, 'SELECT * FROM clients WHERE account_id=? AND archived=0 ORDER BY updated_at DESC', accountId)).map(clientView) });
   if (url.pathname === '/api/clients' && method === 'POST') {
     const input = await body(), name = String(input.name || '').trim().slice(0, 100);
@@ -128,6 +133,43 @@ export async function apiRoute(request, env, viewer, url) {
   if (parts[3] === 'templates' && parts.length === 4 && method === 'GET') {
     const custom = (await all(env.DB, 'SELECT * FROM templates WHERE account_id=? AND client_id=? AND business_pack_id=? ORDER BY created_at DESC', accountId, clientId, client.businessPackId)).map(row => ({ id: row.id, clientId, name: row.name, businessPackId: row.business_pack_id, mode: row.mode, data: parse(row.data_json) }));
     return json({ templates: [...custom, ...builtin.filter(item => item.businessPackId === client.businessPackId)] });
+  }
+  if (parts[3] === 'templates' && parts.length === 4 && method === 'POST') {
+    const input = await body(), image = decodeImage(input.image), asset = await saveAsset(env, accountId, clientId, { kind: 'template-reference', name: input.name || 'Reference', ...image });
+    const id = crypto.randomUUID(), name = String(input.name || 'Custom reference').trim().slice(0, 100);
+    await env.DB.prepare('INSERT INTO templates(id,account_id,client_id,name,business_pack_id,mode,data_json,created_at) VALUES(?,?,?,?,?,?,?,?)').bind(id, accountId, clientId, name, client.businessPackId, 'slides', JSON.stringify({ slides: Array.from({ length: 5 }, (_, i) => ({ position: i + 1, assetId: asset.id })) }), now()).run();
+    return json({ template: { id, clientId, name, businessPackId: client.businessPackId, mode: 'slides', data: { slides: Array.from({ length: 5 }, (_, i) => ({ position: i + 1, assetId: asset.id })) } } }, 201);
+  }
+  if (parts[3] === 'import-project' && parts.length === 4 && method === 'POST') {
+    const input = await body(), source = input.project;
+    if (!source || !Array.isArray(source.slides) || source.slides.length !== 5) return bad('Invalid portable project.');
+    if (source.businessPackId && source.businessPackId !== client.businessPackId) return bad('Project business type does not match this client.');
+    const embedded = input.embeddedAssets || {};
+    if (embedded.template && (embedded.template.mode === 'slides' ? embedded.template.images?.length !== 5 : embedded.template.mode === 'board' ? embedded.template.images?.length !== 1 : true)) return bad('Portable template references are incomplete.');
+    for (const value of [...Object.values(embedded.artworks || {}), ...(embedded.template?.images || []), ...(embedded.logo ? [embedded.logo] : [])]) decodeImage(value);
+    const pack = getBusinessPack(client.businessPackId), context = resolveBusinessContext(client), id = crypto.randomUUID(), stamp = now();
+    const slides = source.slides.map((slide, i) => ({ ...slide, id: `slide-${i + 1}`, artworkAssetId: '', artworkReviewed: false, artworkReviewedAt: '' }));
+    const project = { schemaVersion: 1, topic: String(source.topic || '').slice(0, 450), key: String(source.key || '').slice(0, 80), notes: String(source.notes || '').slice(0, 4000), language: String(source.language || context.language).slice(0, 80), templateId: `builtin:${pack.id}:neutral:1.0.0`, templateVersion: '', slides, instagram: String(source.instagram || ''), facebook: String(source.facebook || ''), youtubeTitle: String(source.youtubeTitle || ''), youtubeDescription: String(source.youtubeDescription || ''), generation: repairGeneration(source.generation), stage: Number(source.stage) || 0, exportHistory: [] };
+    await env.DB.prepare('INSERT INTO projects(id,account_id,client_id,business_pack_id,business_pack_version,recipe_id,context_json,project_json,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?)').bind(id, accountId, clientId, pack.id, pack.version, context.recipe.id, JSON.stringify(context), JSON.stringify(project), stamp, stamp).run();
+    for (let i = 0; i < 5; i++) if (embedded.artworks?.[`slide-${i + 1}`]) {
+      const image = decodeImage(embedded.artworks[`slide-${i + 1}`]);
+      const asset = await saveAsset(env, accountId, clientId, { projectId: id, kind: 'imported-artwork', name: `slide-${i + 1}`, ...image });
+      slides[i].artworkAssetId = asset.id; slides[i].artworkReviewed = Boolean(source.slides[i].artworkReviewed);
+    }
+    if (embedded.template?.images?.length) {
+      const template = embedded.template, refs = [];
+      for (const [i, value] of template.images.entries()) refs.push(await saveAsset(env, accountId, clientId, { kind: 'template-reference', name: `template-${i + 1}`, ...decodeImage(value) }));
+      const templateId = `portable:${id}:template`, data = template.mode === 'board' ? { assetId: refs[0].id, crops: template.crops || [] } : { slides: refs.slice(0, 5).map((asset, i) => ({ position: i + 1, assetId: asset.id })) };
+      await env.DB.prepare('INSERT INTO templates(id,account_id,client_id,name,business_pack_id,mode,data_json,created_at) VALUES(?,?,?,?,?,?,?,?)').bind(templateId, accountId, clientId, String(template.name || 'Imported template').slice(0, 100), pack.id, template.mode, JSON.stringify(data), now()).run();
+      project.templateId = templateId;
+    }
+    let importedContext = context;
+    if (embedded.logo) {
+      const logo = await saveAsset(env, accountId, clientId, { kind: 'imported-project-logo', name: 'logo', ...decodeImage(embedded.logo) });
+      importedContext = { ...context, brand: { ...context.brand, logoAssetId: logo.id } };
+    }
+    await env.DB.prepare('UPDATE projects SET project_json=?,context_json=? WHERE id=? AND account_id=?').bind(JSON.stringify(project), JSON.stringify(importedContext), id, accountId).run();
+    return json({ project: await getProject(env, accountId, clientId, id) }, 201);
   }
   if (parts[3] === 'assets' && parts.length === 5 && method === 'GET') {
     const row = await first(env.DB, 'SELECT object_key,mime FROM assets WHERE account_id=? AND client_id=? AND id=?', accountId, clientId, parts[4]);

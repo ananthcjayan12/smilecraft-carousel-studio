@@ -192,7 +192,7 @@ function clientPage() {
     )
     .join(
       "",
-    )}</div>${S.tab === "overview" ? `<section class="card ready"><h2>Make this client ready to create</h2>${["Business details", "Contact details", "Logo and colours", "Choose a style"].map((x, i) => `<button data-a="tab" data-v="${i === 3 ? "styles" : "brand"}">○ ${x}<span>Add →</span></button>`).join("")}</section>` : S.tab === "projects" ? `<div class="list">${S.projects.map(card).join("") || '<div class="empty">No projects yet.</div>'}</div>` : S.tab === "brand" ? brand() : styles(S.templates, true)}`;
+    )}</div>${S.tab === "overview" ? `<section class="card ready"><h2>Make this client ready to create</h2>${["Business details", "Contact details", "Logo and colours", "Choose a style"].map((x, i) => `<button data-a="tab" data-v="${i === 3 ? "styles" : "brand"}">○ ${x}<span>Add →</span></button>`).join("")}</section>` : S.tab === "projects" ? `<section class="card form"><label class="btn upload">Import a local project JSON<input type="file" data-file="project-json" accept="application/json,.json"></label></section><div class="list">${S.projects.map(card).join("") || '<div class="empty">No projects yet.</div>'}</div>` : S.tab === "brand" ? brand() : styles(S.templates, true)}`;
 }
 function brand() {
   let b = S.client.brand || {},
@@ -214,8 +214,9 @@ const img = (t) => {
     ? `/api/template-assets/${r.assetId}`
     : `/api/clients/${S.client?.id}/assets/${r.assetId}`;
 };
-function styles(ts) {
-  return `<section class="card form"><div class="style-head"><div><h2>Visual styles</h2><p class="muted">Choose a style for consistent carousel artwork.</p></div></div><div class="styles">${ts.map((t) => `<div>${img(t) ? `<img src="${img(t)}">` : "✦"}<b>${E(t.name)}</b><small>${t.clientId === null ? "Shared" : "Private"} style</small></div>`).join("") || '<div class="empty">No styles installed yet.</div>'}</div></section>`;
+function styles(ts, editable = false) {
+  const upload = editable ? `<div class="row" style="gap:12px;flex-wrap:wrap"><label class="btn upload">Upload one reference image<input type="file" data-file="style-image" accept="image/png,image/jpeg,image/webp"></label><label class="btn upload">Import five-slide design ZIP<input type="file" data-file="design-package" accept=".zip,application/zip"></label></div>${S.import ? `<div class="card form"><h3>Package preview</h3><p>${E(S.import.kind)} · ${S.import.images?.length || 0} images</p>${S.import.unresolved ? `<p>Choose five images to map before installing.</p><button class="btn" data-a="confirm-design">Use first five images</button>` : `<p>${(S.import.manifest?.templates || S.import.templates || []).map(t => E(t.name)).join(', ')}</p><button class="btn primary" data-a="install-design">Install styles</button>`}</div>` : ''}` : '';
+  return `<section class="card form"><div class="style-head"><div><h2>Visual styles</h2><p class="muted">Choose a style for consistent carousel artwork.</p></div></div>${upload}<div class="styles">${ts.map((t) => `<div>${img(t) ? `<img src="${img(t)}">` : "✦"}<b>${E(t.name)}</b><small>${t.clientId === null ? "Shared" : "Private"} style</small></div>`).join("") || '<div class="empty">No styles installed yet.</div>'}</div></section>`;
 }
 function library() {
   return `<div class="intro"><span>LIBRARY</span><h1>Styles and creative references.</h1><p>Shared styles are available to compatible client types.</p></div>${styles(S.shared)}`;
@@ -336,7 +337,30 @@ function exportPage() {
   const progress = S.exportProgress;
   const progressView = progress ? `<div class="export-progress" role="status" aria-live="polite"><b>${E(progress.message)}</b>${progress.state === "working" ? `<div class="export-track"><i style="width:${Math.round(progress.done / 7 * 100)}%"></i></div><small>${progress.done}/7 steps complete</small>` : ""}</div>` : "";
   const resultView = S.exportResult ? `<p class="export-result">ZIP prepared. Check your browser’s Downloads list to confirm it was saved.</p>` : "";
-  return `<section class="card export"><span>FINAL STEP</span><h1>${ok ? "Ready to publish." : "Almost there."}</h1><p>${ap()}/5 copy approved · ${im()}/5 images ready · ${rv()}/5 reviewed</p><div class="export-captions"><h2>Social captions</h2><p class="muted">Edit these before exporting. Each caption is included as a separate text file in the ZIP.</p><label>Instagram caption<textarea class="control" data-z="instagram" ${S.busy ? "disabled" : ""}>${E(S.p.instagram || "")}</textarea></label><label>Facebook caption<textarea class="control" data-z="facebook" ${S.busy ? "disabled" : ""}>${E(S.p.facebook ?? S.p.instagram ?? "")}</textarea></label></div><button class="btn primary big" data-a="export" ${ok && !S.busy ? "" : "disabled"}>${S.busy === "export" ? "Preparing carousel ZIP…" : "Download carousel ZIP ↓"}</button>${progressView}${resultView}</section>`;
+  return `<section class="card export"><span>FINAL STEP</span><h1>${ok ? "Ready to publish." : "Almost there."}</h1><p>${ap()}/5 copy approved · ${im()}/5 images ready · ${rv()}/5 reviewed</p><div class="export-captions"><h2>Social captions</h2><p class="muted">Edit these before exporting. Each caption is included as a separate text file in the ZIP.</p><label>Instagram caption<textarea class="control" data-z="instagram" ${S.busy ? "disabled" : ""}>${E(S.p.instagram || "")}</textarea></label><label>Facebook caption<textarea class="control" data-z="facebook" ${S.busy ? "disabled" : ""}>${E(S.p.facebook ?? S.p.instagram ?? "")}</textarea></label></div><button class="btn primary big" data-a="export" ${ok && !S.busy ? "" : "disabled"}>${S.busy === "export" ? "Preparing carousel ZIP…" : "Download carousel ZIP ↓"}</button><button class="btn" data-a="export-portable" ${S.busy ? 'disabled' : ''}>Download editable project backup</button>${progressView}${resultView}</section>`;
+}
+async function exportPortable() {
+  if (S.busy) return;
+  S.busy = 'backup'; render();
+  try {
+    await save();
+    const readImage = async (url) => {
+      const response = await fetch(url);
+      if (!response.ok) throw Error('Could not collect a project image.');
+      const blob = await response.blob();
+      return new Promise((resolve, reject) => { const reader = new FileReader(); reader.onload = () => resolve(reader.result); reader.onerror = () => reject(Error('Could not read project image.')); reader.readAsDataURL(blob); });
+    };
+    const embeddedAssets = { artworks: {} };
+    for (const slide of S.p.slides) if (slide.artworkAssetId) embeddedAssets.artworks[slide.id] = await readImage(`/api/clients/${S.client.id}/assets/${slide.artworkAssetId}`);
+    const template = S.templates.find(item => item.id === S.p.templateId);
+    if (template) {
+      const refs = template.mode === 'slides' ? template.data.slides : [template.data];
+      embeddedAssets.template = { name: template.name, mode: template.mode, crops: template.data.crops, images: await Promise.all(refs.map(ref => readImage(ref.staticPath || `/api/clients/${S.client.id}/assets/${ref.assetId}`))) };
+    }
+    if (S.p.contextSnapshot?.brand?.logoAssetId) embeddedAssets.logo = await readImage(`/api/clients/${S.client.id}/assets/${S.p.contextSnapshot.brand.logoAssetId}`);
+    downloadBlob(new Blob([JSON.stringify({ project: S.p, embeddedAssets })], { type: 'application/json' }), `carousel-project-${S.p.id}.json`);
+    toast('Editable project backup downloaded.');
+  } finally { S.busy = ''; render(); }
 }
 async function exportCarousel() {
   if (S.busy) return;
@@ -711,6 +735,7 @@ async function act(n) {
     if (a === "export") {
       return await exportCarousel();
     }
+    if (a === 'export-portable') return await exportPortable();
   } catch (e) {
     toast(e.message);
   }
@@ -794,6 +819,21 @@ root.onchange = async (e) => {
       S.import = r.preview;
       toast("Design package validated.");
       render();
+    }
+    if (x.dataset.file === 'style-image' && x.files?.[0]) {
+      const file = x.files[0];
+      if (!['image/png', 'image/jpeg', 'image/webp'].includes(file.type) || file.size > 20_000_000) throw Error('Choose a PNG, JPEG or WebP image under 20 MB.');
+      await api(`/api/clients/${S.client.id}/templates`, { name: file.name.replace(/\.[^.]+$/, ''), image: await fileDataUrl(file) });
+      S.templates = (await api(`/api/clients/${S.client.id}/templates`)).templates;
+      toast('Reference style added.'); return render();
+    }
+    if (x.dataset.file === 'project-json' && x.files?.[0]) {
+      const file = x.files[0];
+      if (file.size > 30_000_000) throw Error('Project JSON is too large.');
+      const value = JSON.parse(await file.text());
+      const result = await api(`/api/clients/${S.client.id}/import-project`, value.project ? value : { project: value });
+      S.projects = (await api(`/api/clients/${S.client.id}/projects`)).projects;
+      toast('Project imported.'); return project(result.project.id);
     }
     if (x.dataset.file === "logo" && x.files?.[0]) {
       const file = x.files[0];
