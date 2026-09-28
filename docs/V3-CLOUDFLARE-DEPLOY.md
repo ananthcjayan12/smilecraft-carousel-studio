@@ -1,6 +1,6 @@
 # Bootstrap v3 Cloudflare resources from GitHub Actions
 
-The `v3` branch includes a manual **Bootstrap v3 on Cloudflare** workflow. It provisions D1, a private R2 bucket, a generation Queue and a dead-letter Queue, applies the account/credit schema, and deploys a gated bootstrap Worker. It does not launch the customer app. No Cloudflare resources have been created merely by committing the workflow.
+The `v3` branch includes a **Deploy v3 to Cloudflare** workflow. It runs automatically on pushes to `v3`, and can also be run manually from GitHub Actions. It provisions D1, a private R2 bucket, a generation Queue and a dead-letter Queue, applies the account/credit schema, and deploys a gated bootstrap Worker. It does not launch the customer app. No Cloudflare resources have been created merely by committing the workflow.
 
 ## One-time account setup
 
@@ -12,7 +12,7 @@ The `v3` branch includes a manual **Bootstrap v3 on Cloudflare** workflow. It pr
 
 ## Run
 
-In GitHub **Actions**, choose **Bootstrap v3 on Cloudflare**, select branch `v3`, and run it. The run validates tests and the Worker bundle, creates or reuses resources, applies remote D1 migrations, deploys the Worker, and checks `/health` plus the gated `/api/clients` route. Its summary prints resource names and the bootstrap URL. Re-running the workflow reuses resources and is safe for additive migrations.
+Push a commit to `v3`, or open GitHub **Actions**, choose **Deploy v3 to Cloudflare**, select branch `v3`, and run it. The workflow validates tests and the Worker bundle, creates or reuses resources, applies remote D1 migrations, deploys the Worker, and checks `/health` plus the gated `/api/clients` route. Its summary prints resource names and the bootstrap URL. Re-running the workflow reuses resources and is safe for additive migrations.
 
 The URL shows a maintenance page while the hosted API is unfinished. The existing studio remains usable locally with `npm start`. See [V3-WEB-ARCHITECTURE.md](V3-WEB-ARCHITECTURE.md) for the porting and release gates. Local Node development uses `OPENAI_API_KEY` and `GEMINI_API_KEY` in its process environment (or run `node --env-file=.env server/index.mjs` with an untracked file); it does not read GitHub Actions secrets automatically. The hosted Worker receives those same named keys through the deployment workflow. Payment secrets will be added as Worker secrets when payment integration is implemented. Never put secret values in GitHub variables, `wrangler.json`, D1, or browser code.
 

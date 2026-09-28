@@ -1,5 +1,7 @@
-name: Bootstrap v3 on Cloudflare
+name: Deploy v3 to Cloudflare
 on:
+  push:
+    branches: [v3]
   workflow_dispatch:
 permissions:
   contents: read
