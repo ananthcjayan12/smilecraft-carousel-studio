@@ -1,4 +1,4 @@
-use crate::process::{resolve, run, run_limited};
+use crate::process::{resolve, run, run_limited, OutputLimits};
 use base64::{engine::general_purpose::STANDARD, Engine as _};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
@@ -467,8 +467,10 @@ pub fn generate_image(
         dir.path(),
         Duration::from_millis(remaining.min(600_000)),
         cancel,
-        false,
-        24_000_000,
+        OutputLimits {
+            stderr_output: false,
+            max_bytes: 24_000_000,
+        },
     )?;
     if job.provider == "antigravity" {
         let envelope: Value =

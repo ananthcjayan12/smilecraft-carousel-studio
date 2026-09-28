@@ -117,9 +117,16 @@ pub fn run(
         cwd,
         timeout,
         cancel,
-        stderr_output,
-        512_000,
+        OutputLimits {
+            stderr_output,
+            max_bytes: 512_000,
+        },
     )
+}
+
+pub struct OutputLimits {
+    pub stderr_output: bool,
+    pub max_bytes: usize,
 }
 
 pub fn run_limited(
@@ -129,8 +136,7 @@ pub fn run_limited(
     cwd: &Path,
     timeout: Duration,
     cancel: &AtomicBool,
-    stderr_output: bool,
-    max_output: usize,
+    output_limits: OutputLimits,
 ) -> Result<String, String> {
     if cancel.load(Ordering::SeqCst) {
         return Err("Cancelled".into());
@@ -213,11 +219,11 @@ pub fn run_limited(
         match rx.recv_timeout(Duration::from_millis(40)) {
             Ok((err, chunk)) => {
                 size += chunk.len();
-                if size > max_output {
+                if size > output_limits.max_bytes {
                     failure = Some("CLI output limit exceeded".into());
                     break;
                 }
-                if !err || stderr_output {
+                if !err || output_limits.stderr_output {
                     output.extend(chunk);
                 }
             }
