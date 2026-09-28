@@ -1,10 +1,12 @@
 import { readFile, appendFile } from 'node:fs/promises';
-const { origin } = JSON.parse(await readFile('.cloudflare-state.json', 'utf8'));
+const origin = process.env.SMOKE_ORIGIN || JSON.parse(await readFile('.cloudflare-state.json', 'utf8')).origin;
 let lastError;
+let healthResult;
 for (let attempt = 0; attempt < 8; attempt++) {
   try {
     const health = await fetch(`${origin}/health`, { signal: AbortSignal.timeout(15000) });
     const result = await health.json();
+    healthResult = result;
     if (!health.ok || result.service !== 'carousel-studio-v3' || result.ready !== true) throw new Error('Cloud app health failed.');
     const api = await fetch(`${origin}/api/clients`, { signal: AbortSignal.timeout(15000) });
     if (api.status !== 401) throw new Error('Private customer API was exposed.');
@@ -20,6 +22,6 @@ for (let attempt = 0; attempt < 8; attempt++) {
   }
 }
 if (lastError) throw lastError;
-const summary = 'Cloud app health, private API gate, and sign-in page passed.';
+const summary = `Cloud app health, private API gate, and sign-in page passed. Google sign-in: ${healthResult.signInConfigured ? 'configured' : 'MISSING GOOGLE_CLIENT_ID / GOOGLE_CLIENT_SECRET GitHub secrets'}. AI providers: OpenAI ${healthResult.providersConfigured?.openai ? 'configured' : 'missing'}, Gemini ${healthResult.providersConfigured?.gemini ? 'configured' : 'missing'}.`;
 if (process.env.GITHUB_STEP_SUMMARY) await appendFile(process.env.GITHUB_STEP_SUMMARY, `\n${summary}\n`);
 console.log(summary);
