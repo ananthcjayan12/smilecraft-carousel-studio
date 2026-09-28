@@ -31,6 +31,8 @@ The manual [Cloudflare workflow](../.github/workflows/deploy-cloudflare.yml) run
 
 One-time setup remains in the Cloudflare and GitHub dashboards: activate Workers/R2/Queues where required, configure a `workers.dev` subdomain, create a scoped Cloudflare API token, and enter the account ID/token as GitHub secrets. OAuth and payment applications, plus their keys and callback URLs, must be created at the provider. The workflow cannot accept provider terms or create those external accounts for you.
 
+The owner adds `OPENAI_API_KEY` and `GEMINI_API_KEY` as GitHub Actions **secrets**. The deploy step sends their values to encrypted Worker secret bindings, where backend code receives them as `env.OPENAI_API_KEY` and `env.GEMINI_API_KEY`. They are never browser variables or D1 records. Adding them to the bootstrap Worker prepares the bindings; AI calls will use them after the API and Queue consumer are ported.
+
 ## Migration required before customer launch
 
 1. Port the existing Node/SQLite server to a Cloudflare Worker API using asynchronous D1 queries. `better-sqlite3`, the local filesystem and CLI subprocess adapters cannot be deployed there. Keep the current browser UI, but serve it as Worker static assets after API parity is reached.

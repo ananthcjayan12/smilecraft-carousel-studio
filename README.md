@@ -14,6 +14,8 @@ Template references can be client-private or shared. The ZIP importer accepts ST
 
 There is no desktop build or customer API-key form in v3. AI keys are configured by the service owner on the server. For the future hosted service, users will sign in, select a plan, receive credits after payment, and spend those credits on generation. The current local prototype does **not** enforce login, account isolation or credits; it refuses public network binding to prevent accidental exposure. The deploy workflow currently publishes a gated bootstrap Worker and provisions Cloudflare resources; it does not publish this local Node app. See the architecture document for the migration and launch gates.
 
+For Cloudflare, set `OPENAI_API_KEY` and `GEMINI_API_KEY` as GitHub Actions **secrets**. The [deployment workflow](.github/workflows/deploy-cloudflare.yml) uploads them as encrypted Worker secrets; the future API will read them only in backend code. The local Node app reads the same variable names from its own process environment.
+
 ## Install and run
 
 Requirements: Node.js 20 or newer.

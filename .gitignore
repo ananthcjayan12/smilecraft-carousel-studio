@@ -16,6 +16,8 @@ output/playwright/
 .worker-build/
 wrangler.generated.json
 .cloudflare-state.json
+.dev.vars*
+!.dev.vars.example
 
 # OS files
 .DS_Store
