@@ -5,7 +5,7 @@ import { readFile } from 'node:fs/promises';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { buildCodexPrompt, parseJsonResponse } from '../server/codex.mjs';
+import { buildCodexPrompt, normalizeTextResult, parseJsonResponse, textOutputSchema } from '../server/codex.mjs';
 import { buildSlideImagePrompt, parseAgyImageEnvelope } from '../server/image-providers.mjs';
 import { parseAgyModels } from '../server/text-providers.mjs';
 import { resolveCliBinary } from '../server/cli-tools.mjs';
@@ -23,6 +23,13 @@ test('Codex prompt preserves bilingual scripts and exact configurable clinic ide
   assert.match(prompt, /Do not translate, transliterate, alter, or invent either value/);
   const withoutPhone = buildCodexPrompt('revise', { clinic: { name: 'Another Clinic', phone: '' } });
   assert.match(withoutPhone, /No phone number was provided, so do not invent or display one/);
+});
+test('draft output produces separate social captions and accepts older responses', () => {
+  const slides = Array.from({ length: 5 }, () => ({ heading: 'Heading', body: 'Body', visualPrompt: 'Image' }));
+  assert.ok(textOutputSchema('draft').required.includes('facebook'));
+  assert.match(buildCodexPrompt('draft', { topic: 'Care', clinic: { name: 'Example' } }), /Facebook caption/);
+  assert.equal(normalizeTextResult('draft', { slides, instagram: 'Instagram copy', facebook: 'Facebook copy' }).facebook, 'Facebook copy');
+  assert.equal(normalizeTextResult('draft', { slides, instagram: 'Instagram copy' }).facebook, 'Instagram copy');
 });
 test('image prompt uses approved copy, clinic identity and brand colors exactly', () => {
   const prompt = buildSlideImagePrompt({ slideNumber: 2, slide: { role: 'Science', heading: 'Scaling എന്താണ്?', body: 'Plaque and tartar നീക്കം ചെയ്യുന്നു.', visualPrompt: 'clean dental visual' }, brand: { name: 'Example Dental', phone: '+91 12345 67890', tagline: 'CARE', primary: '#112233', accent: '#abcdef' } });

@@ -208,9 +208,11 @@ async function antigravityImage(prompt, reference, logo, requestedModel, master,
     const { referencePath, logoPath, masterPath } = await writeReferenceFiles(work, reference, logo, master);
     const outputPath = path.join(work, 'final-slide.png');
     const imagePaths = [path.basename(referencePath), ...(masterPath ? [path.basename(masterPath)] : []), ...(logoPath ? [path.basename(logoPath)] : [])];
-    const instruction = `Call the native generate_image tool to create the final image described below. Pass ImageName exactly as "final-slide.png" and ImagePaths exactly as ${JSON.stringify(imagePaths)}. Use the closest supported ${format === 'board' ? '4:3 landscape' : 'portrait'} aspect ratio${format === 'board' ? '' : ' and keep all content inside a 4:5 safe area'}. The required final file is ${outputPath}. Do not only describe the image; actually create the file.\n\n${prompt}`;
     const model = limit(requestedModel, 100).trim();
-    const result = await runProcess(process.env.AGY_BIN || 'agy', ['--mode', 'accept-edits', '--sandbox', '--dangerously-skip-permissions', '--output-format', 'json', ...(model ? ['--model', model] : []), '--print-timeout', process.env.AGY_IMAGE_TIMEOUT || '10m', '-p', instruction], { cwd: work, env: { ...process.env } }, 660000);
+    const imageNames = { 'gemini-3-pro-image': 'Nano Banana Pro', 'gemini-3.1-flash-image': 'Nano Banana 2', 'gemini-3.1-flash-lite-image': 'Nano Banana 2 Lite', 'gemini-2.5-flash-image': 'Nano Banana' };
+    const imageModel = imageNames[model] ? model : 'gemini-3-pro-image';
+    const instruction = `Call the native generate_image tool to create the final image described below. Request ${imageNames[imageModel]} (${imageModel}) for image generation. Pass ImageName exactly as "final-slide.png" and ImagePaths exactly as ${JSON.stringify(imagePaths)}. Use the closest supported ${format === 'board' ? '4:3 landscape' : 'portrait'} aspect ratio${format === 'board' ? '' : ' and keep all content inside a 4:5 safe area'}. The required final file is ${outputPath}. Do not only describe the image; actually create the file.\n\n${prompt}`;
+    const result = await runProcess(process.env.AGY_BIN || 'agy', ['--mode', 'accept-edits', '--sandbox', '--dangerously-skip-permissions', '--output-format', 'json', '--print-timeout', process.env.AGY_IMAGE_TIMEOUT || '10m', '-p', instruction], { cwd: work, env: { ...process.env } }, 660000);
     parseAgyImageEnvelope(result.stdout);
     const generated = await stat(outputPath).catch(() => null);
     if (!generated?.isFile() || generated.size < 10_000) throw new Error('Antigravity completed without creating a usable final-slide.png. Confirm that this agy installation has the native generate_image tool and filesystem permission.');

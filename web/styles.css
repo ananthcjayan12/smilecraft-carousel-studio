@@ -599,6 +599,18 @@ header,
   text-align: center;
   padding: 45px;
 }
+.export-captions { margin: 28px auto; max-width: 540px; text-align: left; }
+.export-captions h2 { margin-bottom: 4px; }
+.export-captions .muted { margin: 0 0 18px; }
+.export-captions label { display: block; margin-top: 16px; }
+.export-captions textarea { min-height: 120px; resize: vertical; }
+.export-progress { margin: 20px auto 0; max-width: 430px; color: #31545d; }
+.export-progress b, .export-progress small { display: block; }
+.export-progress small { margin-top: 6px; color: var(--m); }
+.export-track { height: 8px; margin-top: 10px; background: #dceceb; border-radius: 99px; overflow: hidden; }
+.export-track i { display: block; height: 100%; background: #14ada9; transition: width 180ms ease; }
+.export-result { margin: 16px auto 0; overflow-wrap: anywhere; }
+.export-result strong { display: block; margin-top: 5px; }
 .empty {
   border: 1px dashed #b5d6d5;
   border-radius: 12px;

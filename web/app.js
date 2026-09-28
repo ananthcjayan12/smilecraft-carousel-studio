@@ -2,6 +2,7 @@ import { starterSlides } from "./data.js";
 import { IMAGE_MODELS, WRITING_MODELS } from "./provider-models.js";
 import { runConcurrent } from "./batch-runner.js";
 import { makeZip, downloadBlob } from "./zip.js";
+import { analyzeLogoColors } from "./logo-colors.js";
 const root = document.querySelector("#app"),
   T = document.querySelector("#toast"),
   E = (v) =>
@@ -31,12 +32,15 @@ let S = {
   i: 0,
   busy: "",
   imageProgress: null,
+  exportProgress: null,
+  exportResult: null,
   customLanguage: false,
   tab: "overview",
   form: false,
   import: null,
   importId: "",
   regenerationNotes: {},
+  logoColors: null,
   create: { clientId: "", goal: "Educate", topic: "", facts: "" },
 };
 const api = async (u, d, m = d === undefined ? "GET" : "POST", raw = false) => {
@@ -47,9 +51,16 @@ const api = async (u, d, m = d === undefined ? "GET" : "POST", raw = false) => {
   }
   let r = await fetch(u, o),
     j = await r.json().catch(() => ({}));
-  if (!r.ok) throw Error(j.error || "Something went wrong.");
+  if (!r.ok) throw Error(j.error || `Request failed (${r.status}${r.status === 413 ? ": file is too large" : ""}).`);
   return j;
 };
+const fileDataUrl = (file) =>
+  new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onerror = () => reject(Error("Could not read that image."));
+    reader.onload = () => resolve(String(reader.result || ""));
+    reader.readAsDataURL(file);
+  });
 const toast = (x) => {
     T.textContent = x;
     T.classList.add("show");
@@ -108,6 +119,7 @@ async function client(id) {
     view: "client",
     tab: "overview",
     p: null,
+    logoColors: null,
   });
   render();
 }
@@ -179,8 +191,14 @@ function clientPage() {
 function brand() {
   let b = S.client.brand || {},
     p = S.client.profile || {},
-    q = pk(S.client.businessPackId);
-  return `<section class="card form"><h2>Brand kit</h2><p class="muted">These changes improve future projects. Existing work stays protected.</p><label>Business name</label><input class="control" data-b="name" value="${E(b.name || S.client.name)}"><div class="two"><label>Phone<input class="control" data-b="phone" value="${E(b.phone || "")}"></label><label>Location / service area<input class="control" data-b="location" value="${E(b.location || "")}"></label></div><div class="two"><label>Primary colour<input type="color" data-b="primary" value="${E(b.primary || "#073a42")}"></label><label>Accent colour<input type="color" data-b="accent" value="${E(b.accent || "#14ada9")}"></label></div>${(q.onboardingFields || []).map(([k, l, t]) => `<label>${E(l)}${t === "textarea" ? `<textarea class="control" data-p="${k}">${E(p[k] || "")}</textarea>` : `<input class="control" data-p="${k}" value="${E(p[k] || "")}">`}</label>`).join("")}<button class="btn primary right" data-a="save">Save brand kit</button></section>`;
+    q = pk(S.client.businessPackId),
+    logoUrl = b.logoAssetId
+      ? `/api/clients/${S.client.id}/assets/${b.logoAssetId}`
+      : "";
+  const suggested = S.logoColors
+    ? `<div class="logo-analysis"><span><i class="color-dot" style="background:${E(S.logoColors.primary)}"></i><i class="color-dot" style="background:${E(S.logoColors.accent)}"></i> Colours found in this logo</span><button class="btn" data-a="use-logo-colors">Use these colours</button></div>`
+    : "";
+  return `<section class="card form"><h2>Brand kit</h2><p class="muted">These changes improve future projects. Existing work stays protected.</p><label>Business name</label><input class="control" data-b="name" value="${E(b.name || S.client.name)}"><div class="two"><label>Phone<input class="control" data-b="phone" value="${E(b.phone || "")}"></label><label>Location / service area<input class="control" data-b="location" value="${E(b.location || "")}"></label></div><label>Logo <small>PNG, JPEG or WebP</small></label><div class="logo-analysis">${logoUrl ? `<img src="${logoUrl}" alt="${E(b.name || S.client.name)} logo" style="max-width:160px;max-height:72px;object-fit:contain;object-position:left">` : `<span class="muted">No logo uploaded yet.</span>`}<label class="btn upload">${logoUrl ? "Replace logo" : "Upload logo"}<input type="file" data-file="logo" accept="image/png,image/jpeg,image/webp"></label></div>${suggested}<div class="two"><label>Primary colour<input type="color" data-b="primary" value="${E(b.primary || "#073a42")}"></label><label>Accent colour<input type="color" data-b="accent" value="${E(b.accent || "#14ada9")}"></label></div>${(q.onboardingFields || []).map(([k, l, t]) => `<label>${E(l)}${t === "textarea" ? `<textarea class="control" data-p="${k}">${E(p[k] || "")}</textarea>` : `<input class="control" data-p="${k}" value="${E(p[k] || "")}">`}</label>`).join("")}<button class="btn primary right" data-a="save">Save brand kit</button></section>`;
 }
 const img = (t) => {
   let r = t.mode === "slides" ? t.data?.slides?.[0] : t.data;
@@ -261,6 +279,8 @@ function imageControls() {
       model: "gpt-image-2",
     });
   const models = IMAGE_MODELS[g.provider] || [];
+  if (g.provider === "antigravity" && !models.some(([id]) => id === g.model))
+    g.model = models[0]?.[0] || "";
   return `<div class="model-panel"><label>Image provider<select class="control" data-g="provider" ${S.busy ? "disabled" : ""}>${Object.keys(
     IMAGE_MODELS,
   )
@@ -270,7 +290,7 @@ function imageControls() {
     )
     .join(
       "",
-    )}</select></label><label>Image model<select class="control" data-g="model" ${S.busy ? "disabled" : ""}>${models.map(([id, label]) => `<option value="${id}" ${id === g.model ? "selected" : ""}>${E(label)}</option>`).join("")}</select></label></div>`;
+    )}</select></label><label>${g.provider === "antigravity" ? "Requested image model" : "Image model"}<select class="control" data-g="model" ${S.busy ? "disabled" : ""}>${models.map(([id, label]) => `<option value="${id}" ${id === g.model ? "selected" : ""}>${E(label)}</option>`).join("")}</select></label>${g.provider === "antigravity" ? '<p class="muted">Antigravity chooses the actual model for its native image tool; this selection is sent as a request.</p>' : ""}</div>`;
 }
 function templateSelector() {
   return `<div class="styles">${S.templates.map((t) => `<button class="${S.p.templateId === t.id ? "sel" : ""}" data-a="style" data-v="${t.id}" ${S.busy ? "disabled" : ""}>${img(t) ? `<img src="${img(t)}">` : "✦"}<b>${E(t.name)}</b></button>`).join("") || '<div class="empty">No compatible templates are installed for this client.</div>'}</div>`;
@@ -320,7 +340,52 @@ function review() {
 }
 function exportPage() {
   let ok = ap() === 5 && im() === 5 && rv() === 5;
-  return `<section class="card export"><span>FINAL STEP</span><h1>${ok ? "Ready to publish." : "Almost there."}</h1><p>${ap()}/5 copy approved · ${im()}/5 images ready · ${rv()}/5 reviewed</p><button class="btn primary big" data-a="export" ${ok ? "" : "disabled"}>Download carousel ZIP ↓</button></section>`;
+  const progress = S.exportProgress;
+  const progressView = progress ? `<div class="export-progress" role="status" aria-live="polite"><b>${E(progress.message)}</b>${progress.state === "working" ? `<div class="export-track"><i style="width:${Math.round(progress.done / 7 * 100)}%"></i></div><small>${progress.done}/7 steps complete</small>` : ""}</div>` : "";
+  const resultView = S.exportResult ? `<p class="export-result">${S.status.desktop ? `Saved to <strong>${E(S.exportResult.path)}</strong>` : "ZIP prepared. Check your browser’s Downloads list to confirm it was saved."}</p>` : "";
+  return `<section class="card export"><span>FINAL STEP</span><h1>${ok ? "Ready to publish." : "Almost there."}</h1><p>${ap()}/5 copy approved · ${im()}/5 images ready · ${rv()}/5 reviewed</p><div class="export-captions"><h2>Social captions</h2><p class="muted">Edit these before exporting. Each caption is included as a separate text file in the ZIP.</p><label>Instagram caption<textarea class="control" data-z="instagram" ${S.busy ? "disabled" : ""}>${E(S.p.instagram || "")}</textarea></label><label>Facebook caption<textarea class="control" data-z="facebook" ${S.busy ? "disabled" : ""}>${E(S.p.facebook ?? S.p.instagram ?? "")}</textarea></label></div><button class="btn primary big" data-a="export" ${ok && !S.busy ? "" : "disabled"}>${S.busy === "export" ? "Preparing carousel ZIP…" : "Download carousel ZIP ↓"}</button>${progressView}${resultView}</section>`;
+}
+async function exportCarousel() {
+  if (S.busy) return;
+  clearTimeout(timer);
+  S.p.facebook ??= S.p.instagram || "";
+  S.busy = "export";
+  S.exportResult = null;
+  const progress = (done, message, state = "working") => { S.exportProgress = { done, message, state }; render(); };
+  try {
+    await save();
+    progress(0, "Collecting slide 1 of 5…");
+    const files = [];
+    for (let i = 0; i < 5; i++) {
+      const response = await fetch(`/api/clients/${S.client.id}/assets/${S.p.slides[i].artworkAssetId}`);
+      if (!response.ok) throw Error(`Could not load slide ${i + 1} (${response.status}).`);
+      files.push({ name: `slide-${i + 1}.png`, data: new Uint8Array(await response.arrayBuffer()) });
+      progress(i + 1, i < 4 ? `Collecting slide ${i + 2} of 5…` : "Creating ZIP…");
+    }
+    const encoder = new TextEncoder();
+    files.push({ name: "instagram-caption.txt", data: encoder.encode(S.p.instagram || "") });
+    files.push({ name: "facebook-caption.txt", data: encoder.encode(S.p.facebook ?? S.p.instagram ?? "") });
+    files.push({ name: "project.json", data: encoder.encode(JSON.stringify(S.p)) });
+    const zip = await makeZip(files);
+    progress(6, S.status.desktop ? "Saving ZIP to Downloads…" : "Starting browser download…");
+    if (S.status.desktop) {
+      const response = await fetch("/api/desktop/exports", { method: "POST", headers: { "Content-Type": "application/zip" }, body: zip });
+      const result = await response.json().catch(() => ({}));
+      if (!response.ok) throw Error(result.error || "Could not save the carousel ZIP.");
+      S.exportResult = result;
+      progress(7, `Saved ${result.filename} to Downloads.`, "done");
+    } else {
+      downloadBlob(zip, "carousel.zip");
+      S.exportResult = { filename: "carousel.zip" };
+      progress(7, "Browser download started.", "done");
+    }
+  } catch (error) {
+    progress(S.exportProgress?.done || 0, error.message, "failed");
+    throw error;
+  } finally {
+    S.busy = "";
+    render();
+  }
 }
 async function save() {
   let p = S.p,
@@ -334,6 +399,8 @@ async function save() {
         stage: p.stage,
         templateId: p.templateId,
         slides: p.slides,
+        instagram: p.instagram,
+        facebook: p.facebook,
         generation: p.generation,
       },
       "PATCH",
@@ -501,6 +568,13 @@ async function act(n) {
       toast("Brand kit saved.");
       return render();
     }
+    if (a === "use-logo-colors") {
+      if (!S.logoColors) return;
+      document.querySelector('[data-b="primary"]').value = S.logoColors.primary;
+      document.querySelector('[data-b="accent"]').value = S.logoColors.accent;
+      toast("Logo colours selected. Save the brand kit to keep them.");
+      return;
+    }
     if (a === "back") {
       S.view = "client";
       S.tab = "projects";
@@ -639,22 +713,7 @@ async function act(n) {
       return render();
     }
     if (a === "export") {
-      let f = [];
-      for (let i = 0; i < 5; i++) {
-        let r = await fetch(
-          `/api/clients/${S.client.id}/assets/${S.p.slides[i].artworkAssetId}`,
-        );
-        f.push({
-          name: `slide-${i + 1}.png`,
-          data: new Uint8Array(await r.arrayBuffer()),
-        });
-      }
-      f.push({
-        name: "project.json",
-        data: new TextEncoder().encode(JSON.stringify(S.p)),
-      });
-      downloadBlob(await makeZip(f), "carousel.zip");
-      toast("Your carousel ZIP is downloading.");
+      return await exportCarousel();
     }
   } catch (e) {
     toast(e.message);
@@ -738,6 +797,34 @@ root.onchange = async (e) => {
       S.importId = r.id;
       S.import = r.preview;
       toast("Design package validated.");
+      render();
+    }
+    if (x.dataset.file === "logo" && x.files?.[0]) {
+      const file = x.files[0];
+      if (!['image/png', 'image/jpeg', 'image/webp'].includes(file.type))
+        throw Error("Choose a PNG, JPEG or WebP logo.");
+      if (file.size > 20_000_000) throw Error("Logo must be 20 MB or smaller.");
+      const image = await fileDataUrl(file);
+      const [upload, colors] = await Promise.all([
+        api(`/api/clients/${S.client.id}/assets`, {
+          image,
+          kind: "client-logo",
+          name: file.name,
+        }),
+        analyzeLogoColors(image),
+      ]);
+      S.client = (
+        await api(
+          `/api/clients/${S.client.id}`,
+          {
+            expectedRevision: S.client.revision,
+            brand: { ...S.client.brand, logoAssetId: upload.asset.id },
+          },
+          "PATCH",
+        )
+      ).client;
+      S.logoColors = colors;
+      toast("Logo uploaded. Review the detected colours below.");
       render();
     }
   } catch (error) {

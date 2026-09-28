@@ -4,6 +4,7 @@ import { mkdtemp, writeFile, readFile, rm } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { repairGeneration, friendlyGenerationError } from '../web/studio-controls.js';
+import { compatibleModel, IMAGE_MODELS } from '../web/provider-models.js';
 import { generateSlideImage } from '../server/image-providers.mjs';
 
 test('saved provider/model mismatches are repaired without changing valid selections', () => {
@@ -12,6 +13,9 @@ test('saved provider/model mismatches are repaired without changing valid select
   assert.equal(repairGeneration({ provider: 'openai', model: 'gpt-5.6-sol' }).model, 'gpt-image-2');
   assert.equal(repairGeneration({ provider: 'codex', model: 'gpt-5.6-terra' }).model, 'gpt-5.6-terra');
   assert.equal(repairGeneration({ writingProvider: 'claude', writingModel: 'gpt-5.6-sol' }).writingModel, 'claude-sonnet-4-6');
+  assert.equal(compatibleModel('antigravity', 'gemini-3.8-flash-high', 'image'), 'gemini-3-pro-image');
+  assert.equal(compatibleModel('antigravity', 'gemini-3.1-flash-image', 'image'), 'gemini-3.1-flash-image');
+  assert.ok(IMAGE_MODELS.antigravity.every(([id]) => id.includes('-image')));
 });
 
 test('Codex image adapter uses a Codex model and all three references with the v1 instructions', async () => {
