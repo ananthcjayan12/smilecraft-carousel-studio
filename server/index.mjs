@@ -15,6 +15,9 @@ import { installTemplateRecords, storageRoot, listClients, getClient, createClie
 import { stageTemplateImport, updateTemplateImport, installTemplateImport, cleanupImports } from './template-import.mjs';
 
 const root=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'..'),site=path.join(root,'web'),legacyStorage=path.join(storageRoot,'projects'),port=Number(process.env.PORT)||4178,host=process.env.HOST||'127.0.0.1';
+if (!['127.0.0.1', 'localhost', '::1'].includes(host)) {
+  throw new Error('v3 is not ready for public hosting: login, account isolation and credit checks must be enforced first. Keep HOST on loopback.');
+}
 await mkdir(legacyStorage,{recursive:true});await cleanupImports().catch(()=>{});
 const mime={'.html':'text/html; charset=utf-8','.css':'text/css; charset=utf-8','.js':'text/javascript; charset=utf-8','.json':'application/json; charset=utf-8','.jpg':'image/jpeg','.jpeg':'image/jpeg','.png':'image/png','.svg':'image/svg+xml','.ico':'image/x-icon','.webp':'image/webp'};
 const safeId=id=>/^[\w:-]{6,180}$/.test(id??'');
@@ -72,7 +75,12 @@ if(parts[0]==='api'&&parts[1]==='clients'&&parts[3]==='import-project'&&parts.le
 if(parts[0]==='api'&&parts[1]==='clients'&&parts[3]==='projects'&&parts.length===5&&req.method==='GET'){const p=getProject(parts[2],parts[4]);return p?send(res,200,{project:p}):send(res,404,{error:'Project not found.'})}
 if(parts[0]==='api'&&parts[1]==='clients'&&parts[3]==='projects'&&parts.length===5&&req.method==='PATCH')return send(res,200,{project:saveProject(parts[2],parts[4],await body(req,8_000_000))});
 if(parts[0]==='api'&&parts[1]==='clients'&&parts[3]==='projects'&&parts[5]==='apply-client-settings'&&req.method==='POST'){const d=await body(req);return send(res,200,{project:applyLatestClientSettings(parts[2],parts[4],d.expectedRevision)})}
-if(parts[0]==='api'&&parts[1]==='clients'&&parts[3]==='projects'&&parts[5]==='jobs'&&req.method==='POST')return send(res,200,await runScopedJob(parts[2],parts[4],await body(req,2_000_000)));
+if(parts[0]==='api'&&parts[1]==='clients'&&parts[3]==='projects'&&parts[5]==='jobs'&&req.method==='POST'){
+  const d=await body(req,2_000_000),allowed=d.stage==='image'?['openai','gemini']:['openai','gemini','claude'];
+  if(d.provider&&!allowed.includes(d.provider))return send(res,400,{error:'Choose a server-managed API provider.'});
+  if(!d.provider){const p=getProject(parts[2],parts[4]),stored=d.stage==='image'?p?.generation?.provider:p?.generation?.writingProvider;d.provider=allowed.includes(stored)?stored:'openai';}
+  return send(res,200,await runScopedJob(parts[2],parts[4],d));
+}
 if(parts[0]==='api'&&parts[1]==='clients'&&parts[3]==='projects'&&parts[5]==='jobs'&&req.method==='GET')return send(res,200,{jobs:listJobs(parts[2],parts[4])});
 if(parts[0]==='api'&&parts[1]==='clients'&&parts[3]==='templates'&&parts.length===4&&req.method==='POST'){
   const client=getClient(parts[2]);if(!client)return send(res,404,{error:'Client not found.'});

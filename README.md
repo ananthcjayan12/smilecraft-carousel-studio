@@ -1,6 +1,6 @@
-# Carousel Studio — multi-business local agency workspace
+# Carousel Studio v3 — web-only product branch
 
-This branch implements the multi-business design in `docs/MULTI-BUSINESS-DESIGN.md` and `docs/MULTI-BUSINESS-IMPLEMENTATION-PLAN.md` while preserving the existing SmileCraft dental workflow and provider adapters.
+This branch starts the web-only successor to `v.a.1`. The original desktop version remains on the `v.a.1` branch. The existing creative workflow runs in a browser; the proposed hosted account, login, subscription and credit system is specified in [`docs/V3-WEB-ARCHITECTURE.md`](docs/V3-WEB-ARCHITECTURE.md) and is not implemented yet.
 
 ## What changed
 
@@ -10,21 +10,9 @@ Projects pin a serialized client/business context snapshot. Updating a client do
 
 Template references can be client-private or shared. The ZIP importer accepts STORE or DEFLATE archives, optional `pack.json`, exactly-five-image archives, legacy SmileCraft master boards, staged mapping, versions and safety limits. See `docs/PACKING-GUIDE.md` or download the guide/example archive from Shared Templates in the app.
 
-## Lightweight desktop build (v.a.1)
+## Web-only direction
 
-The `v.a.1` branch adds a single-install Tauri desktop edition for macOS and Windows. It deliberately does **not** bundle Electron/Chromium, Node.js or Python. The existing web UI runs inside the operating system webview while a small Rust core owns local SQLite, files, secure credentials and optional CLI execution.
-
-Desktop commands:
-
-```sh
-npm install
-npm run desktop:dev
-npm run desktop:build
-```
-
-Customer AI credentials are stored in the operating system credential vault and provider calls use the customer's own accounts. Codex/Antigravity are optional advanced integrations and are not bundled with the application.
-
-GitHub Actions in `.github/workflows/desktop-build.yml` produce a universal macOS DMG and Windows NSIS EXE. `.github/workflows/desktop-release.yml` is the release path and accepts Apple signing/notarization secrets for customer-ready macOS builds. See `docs/DESKTOP-V-A-1.md` for architecture, signing and updater notes.
+There is no desktop build or customer API-key form in v3. AI keys are configured by the service owner on the server. For the future hosted service, users will sign in, select a plan, receive credits after payment, and spend those credits on generation. The current local prototype does **not** enforce login, account isolation or credits; it refuses public network binding to prevent accidental exposure. See the architecture document for the migration and launch gates.
 
 ## Install and run
 
@@ -37,7 +25,7 @@ npm start
 
 Open `http://127.0.0.1:4178`.
 
-The server binds to localhost by default. Do not expose this unauthenticated first release directly to a public network.
+The server binds to localhost and rejects non-loopback hosts. Do not expose it through a reverse proxy or tunnel while authentication and credits are unfinished.
 
 ### Storage
 
@@ -69,7 +57,7 @@ Writing: Codex CLI, OpenAI API, Gemini API, Antigravity CLI, Claude API.
 
 Images: OpenAI API, Gemini API, Codex CLI image generation, Antigravity CLI native image generation.
 
-Set keys/CLI paths through server environment variables; see `.env.example`. API keys are never stored in browser project data.
+For the current local prototype, set owner-managed provider keys through server environment variables; see `.env.example`. API keys are never stored in browser project data. Hosted v3 will limit provider and model choices through an owner-curated catalog.
 
 ## Legacy SmileCraft data
 

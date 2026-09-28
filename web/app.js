@@ -215,19 +215,8 @@ function library() {
   return `<div class="intro"><span>LIBRARY</span><h1>Styles and creative references.</h1><p>Shared styles are available to compatible client types.</p></div>${styles(S.shared)}`;
 }
 function settings() {
-  const apiProviders = [
-    ["openai", "OpenAI API"],
-    ["gemini", "Gemini API"],
-    ["claude", "Claude API"],
-  ];
-  const cli = S.status.cli || {};
-  return `<div class="intro"><span>SETTINGS</span><h1>Workspace settings.</h1><p>Your API keys stay in this computer's secure credential store and are never sent to Carousel Studio servers.</p></div>
-  <section class="card form"><h2>Bring your own AI</h2><p class="muted">Add only the providers you want to use. Keys are stored by macOS Keychain / Windows Credential Manager.</p>
-  ${apiProviders.map(([id,label]) => `<div class="provider-key"><div><b>${label}</b><small>${S.status.textProviders?.[id]?.available ? "Connected" : "Not connected"}</small></div><input id="key-${id}" class="control" type="password" autocomplete="off" placeholder="Paste API key"><button class="btn primary" data-a="save-key" data-provider="${id}">Save</button><button class="btn" data-a="remove-key" data-provider="${id}">Remove</button></div>`).join("")}</section>
-  <section class="card form"><h2>Advanced local tools</h2>
-  <p class="provider">Codex CLI <b>${cli.codex?.installed ? (cli.codex?.authenticated ? "Ready" : "Login required") : "Not installed"}</b><small>${E(cli.codex?.version || "")}</small></p>
-  <p class="provider">Antigravity CLI <b>${cli.antigravity?.installed ? "Detected" : "Not installed"}</b><small>${E(cli.antigravity?.version || "")}</small></p>
-  <p class="muted">CLI tools are optional and are not bundled with Carousel Studio.</p></section>`;
+  return `<div class="intro"><span>SETTINGS</span><h1>Workspace settings.</h1><p>AI providers are configured by the service owner on the server.</p></div>
+  <section class="card form"><h2>AI service</h2><p class="muted">Your workspace does not need a provider API key. The service owner manages provider access; account plans and credits are being designed for v3.</p></section>`;
 }
 function render() {
   let content =
@@ -256,12 +245,12 @@ function writingControls() {
   const g =
     S.p.generation ||
     (S.p.generation = {
-      writingProvider: "codex",
+      writingProvider: "openai",
       writingModel: "gpt-5.6-sol",
     });
   const models = WRITING_MODELS[g.writingProvider] || [];
   return `<div class="model-panel"><label>Writing provider<select class="control" data-g="writingProvider">${Object.keys(
-    WRITING_MODELS,
+    { openai: WRITING_MODELS.openai, gemini: WRITING_MODELS.gemini, claude: WRITING_MODELS.claude },
   )
     .map(
       (id) =>
@@ -279,10 +268,8 @@ function imageControls() {
       model: "gpt-image-2",
     });
   const models = IMAGE_MODELS[g.provider] || [];
-  if (g.provider === "antigravity" && !models.some(([id]) => id === g.model))
-    g.model = models[0]?.[0] || "";
   return `<div class="model-panel"><label>Image provider<select class="control" data-g="provider" ${S.busy ? "disabled" : ""}>${Object.keys(
-    IMAGE_MODELS,
+    { openai: IMAGE_MODELS.openai, gemini: IMAGE_MODELS.gemini },
   )
     .map(
       (id) =>
@@ -290,7 +277,7 @@ function imageControls() {
     )
     .join(
       "",
-    )}</select></label><label>${g.provider === "antigravity" ? "Requested image model" : "Image model"}<select class="control" data-g="model" ${S.busy ? "disabled" : ""}>${models.map(([id, label]) => `<option value="${id}" ${id === g.model ? "selected" : ""}>${E(label)}</option>`).join("")}</select></label>${g.provider === "antigravity" ? '<p class="muted">Antigravity chooses the actual model for its native image tool; this selection is sent as a request.</p>' : ""}</div>`;
+    )}</select></label><label>Image model<select class="control" data-g="model" ${S.busy ? "disabled" : ""}>${models.map(([id, label]) => `<option value="${id}" ${id === g.model ? "selected" : ""}>${E(label)}</option>`).join("")}</select></label></div>`;
 }
 function templateSelector() {
   return `<div class="styles">${S.templates.map((t) => `<button class="${S.p.templateId === t.id ? "sel" : ""}" data-a="style" data-v="${t.id}" ${S.busy ? "disabled" : ""}>${img(t) ? `<img src="${img(t)}">` : "✦"}<b>${E(t.name)}</b></button>`).join("") || '<div class="empty">No compatible templates are installed for this client.</div>'}</div>`;
@@ -342,7 +329,7 @@ function exportPage() {
   let ok = ap() === 5 && im() === 5 && rv() === 5;
   const progress = S.exportProgress;
   const progressView = progress ? `<div class="export-progress" role="status" aria-live="polite"><b>${E(progress.message)}</b>${progress.state === "working" ? `<div class="export-track"><i style="width:${Math.round(progress.done / 7 * 100)}%"></i></div><small>${progress.done}/7 steps complete</small>` : ""}</div>` : "";
-  const resultView = S.exportResult ? `<p class="export-result">${S.status.desktop ? `Saved to <strong>${E(S.exportResult.path)}</strong>` : "ZIP prepared. Check your browser’s Downloads list to confirm it was saved."}</p>` : "";
+  const resultView = S.exportResult ? `<p class="export-result">ZIP prepared. Check your browser’s Downloads list to confirm it was saved.</p>` : "";
   return `<section class="card export"><span>FINAL STEP</span><h1>${ok ? "Ready to publish." : "Almost there."}</h1><p>${ap()}/5 copy approved · ${im()}/5 images ready · ${rv()}/5 reviewed</p><div class="export-captions"><h2>Social captions</h2><p class="muted">Edit these before exporting. Each caption is included as a separate text file in the ZIP.</p><label>Instagram caption<textarea class="control" data-z="instagram" ${S.busy ? "disabled" : ""}>${E(S.p.instagram || "")}</textarea></label><label>Facebook caption<textarea class="control" data-z="facebook" ${S.busy ? "disabled" : ""}>${E(S.p.facebook ?? S.p.instagram ?? "")}</textarea></label></div><button class="btn primary big" data-a="export" ${ok && !S.busy ? "" : "disabled"}>${S.busy === "export" ? "Preparing carousel ZIP…" : "Download carousel ZIP ↓"}</button>${progressView}${resultView}</section>`;
 }
 async function exportCarousel() {
@@ -367,18 +354,10 @@ async function exportCarousel() {
     files.push({ name: "facebook-caption.txt", data: encoder.encode(S.p.facebook ?? S.p.instagram ?? "") });
     files.push({ name: "project.json", data: encoder.encode(JSON.stringify(S.p)) });
     const zip = await makeZip(files);
-    progress(6, S.status.desktop ? "Saving ZIP to Downloads…" : "Starting browser download…");
-    if (S.status.desktop) {
-      const response = await fetch("/api/desktop/exports", { method: "POST", headers: { "Content-Type": "application/zip" }, body: zip });
-      const result = await response.json().catch(() => ({}));
-      if (!response.ok) throw Error(result.error || "Could not save the carousel ZIP.");
-      S.exportResult = result;
-      progress(7, `Saved ${result.filename} to Downloads.`, "done");
-    } else {
-      downloadBlob(zip, "carousel.zip");
-      S.exportResult = { filename: "carousel.zip" };
-      progress(7, "Browser download started.", "done");
-    }
+    progress(6, "Starting browser download…");
+    downloadBlob(zip, "carousel.zip");
+    S.exportResult = { filename: "carousel.zip" };
+    progress(7, "Browser download started.", "done");
   } catch (error) {
     progress(S.exportProgress?.done || 0, error.message, "failed");
     throw error;
@@ -441,23 +420,6 @@ async function job(stage, extra = {}) {
 async function act(n) {
   try {
     let a = n.dataset.a;
-    if (a === "save-key") {
-      const provider = n.dataset.provider;
-      const input = document.querySelector(`#key-${provider}`);
-      const key = String(input?.value || "").trim();
-      if (!key) throw Error("Paste the API key first.");
-      await api(`/api/desktop/credentials/${provider}`, { key });
-      await load();
-      toast("API key saved securely on this device.");
-      return render();
-    }
-    if (a === "remove-key") {
-      const provider = n.dataset.provider;
-      await api(`/api/desktop/credentials/${provider}`, {}, "DELETE");
-      await load();
-      toast("API key removed from this device.");
-      return render();
-    }
     if (a === "nav") {
       S.view = n.dataset.v;
       S.client = S.p = null;

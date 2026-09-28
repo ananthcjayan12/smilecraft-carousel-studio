@@ -1,8 +1,8 @@
 import { IMAGE_MODELS, WRITING_MODELS, compatibleModel } from './provider-models.js';
 
 export function repairGeneration(g = {}) {
-  const provider = IMAGE_MODELS[g.provider] ? g.provider : 'openai';
-  const writingProvider = WRITING_MODELS[g.writingProvider] ? g.writingProvider : 'codex';
+  const provider = ['openai', 'gemini'].includes(g.provider) ? g.provider : 'openai';
+  const writingProvider = ['openai', 'gemini', 'claude'].includes(g.writingProvider) ? g.writingProvider : 'openai';
   return { ...g, provider, writingProvider, model: compatibleModel(provider, g.model, 'image'), writingModel: compatibleModel(writingProvider, g.writingModel) };
 }
 
