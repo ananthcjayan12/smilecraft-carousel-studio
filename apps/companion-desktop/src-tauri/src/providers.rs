@@ -1,4 +1,5 @@
-use crate::process::{resolve, run};
+use crate::process::{resolve, run, run_limited};
+use base64::{engine::general_purpose::STANDARD, Engine as _};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::{sync::atomic::AtomicBool, time::Duration};
@@ -14,6 +15,74 @@ pub struct Capability {
     pub ready: bool,
     pub version: String,
     pub detail: String,
+    pub models: Vec<Model>,
+    #[serde(rename = "imageModels")]
+    pub image_models: Vec<Model>,
+}
+#[derive(Clone, Serialize)]
+pub struct Model {
+    pub id: String,
+    pub label: String,
+}
+fn parse_agy_models(output: &str) -> Vec<Model> {
+    output
+        .lines()
+        .filter_map(|line| {
+            let (id, label) = line.split_once('\t')?;
+            let id = id.trim();
+            let label = label.trim();
+            (valid_model(id) && !label.is_empty() && label.len() <= 120).then(|| Model {
+                id: id.into(),
+                label: label.into(),
+            })
+        })
+        .take(100)
+        .collect()
+}
+fn valid_model(id: &str) -> bool {
+    !id.is_empty()
+        && id.len() <= 100
+        && id
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'-' | b'_' | b'.' | b'/'))
+}
+fn codex_models() -> Vec<Model> {
+    let Some(home) = dirs::home_dir() else {
+        return vec![];
+    };
+    let path = std::env::var_os("CODEX_HOME")
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(|| home.join(".codex"))
+        .join("models_cache.json");
+    let Ok(raw) = std::fs::read_to_string(path) else {
+        return vec![];
+    };
+    let Ok(value) = serde_json::from_str::<Value>(&raw) else {
+        return vec![];
+    };
+    value["models"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(|item| {
+            if item["visibility"] != "list" {
+                return None;
+            }
+            let id = item["slug"].as_str()?;
+            if !valid_model(id) {
+                return None;
+            }
+            let label = item["display_name"]
+                .as_str()
+                .filter(|s| !s.is_empty() && s.len() <= 120)
+                .unwrap_or(id);
+            Some(Model {
+                id: id.into(),
+                label: label.into(),
+            })
+        })
+        .take(100)
+        .collect()
 }
 pub fn inspect(paths: &Paths, cancel: &AtomicBool) -> Value {
     let mut map = serde_json::Map::new();
@@ -55,6 +124,7 @@ pub fn inspect(paths: &Paths, cancel: &AtomicBool) -> Value {
                     "--disable-slash-commands",
                     "--sandbox",
                     "--mode",
+                    "--dangerously-skip-permissions",
                 ]
             };
             if flags.iter().any(|flag| !help.contains(flag)) {
@@ -74,9 +144,33 @@ pub fn inspect(paths: &Paths, cancel: &AtomicBool) -> Value {
                 },
                 15,
             )?;
-            if provider == "antigravity" && account.trim().is_empty() {
+            c.models = if provider == "antigravity" {
+                parse_agy_models(&account)
+            } else {
+                codex_models()
+            };
+            if provider == "antigravity" && c.models.is_empty() {
                 return Err("No models available. Sign in to Antigravity.".into());
             }
+            c.image_models = if provider == "codex" {
+                vec![Model {
+                    id: "imagegen".into(),
+                    label: "Codex ImageGen".into(),
+                }]
+            } else {
+                [
+                    ("gemini-3-pro-image", "Nano Banana Pro"),
+                    ("gemini-3.1-flash-image", "Nano Banana 2"),
+                    ("gemini-3.1-flash-lite-image", "Nano Banana 2 Lite"),
+                    ("gemini-2.5-flash-image", "Nano Banana"),
+                ]
+                .into_iter()
+                .map(|(id, label)| Model {
+                    id: id.into(),
+                    label: label.into(),
+                })
+                .collect()
+            };
             c.ready = true;
             c.detail = if provider == "codex" {
                 "Signed in; CLI default model."
@@ -106,6 +200,8 @@ pub struct Job {
 #[derive(Clone, Deserialize)]
 pub struct Input {
     pub prompt: String,
+    #[serde(default)]
+    pub model: String,
 }
 fn valid_slide(v: &Value) -> bool {
     let Some(o) = v.as_object() else { return false };
@@ -157,6 +253,9 @@ pub fn generate(job: &Job, paths: &Paths, cancel: &AtomicBool) -> Result<Value, 
     {
         return Err("Invalid job input".into());
     }
+    if !job.input.model.is_empty() && !valid_model(&job.input.model) {
+        return Err("Invalid model".into());
+    }
     let schema = if job.task == "revise" {
         json!({"type":"object","properties":{"heading":{"type":"string"},"body":{"type":"string"},"visualPrompt":{"type":"string"}},"required":["heading","body","visualPrompt"],"additionalProperties":false})
     } else if job.task == "draft" {
@@ -181,12 +280,17 @@ pub fn generate(job: &Job, paths: &Paths, cancel: &AtomicBool) -> Result<Value, 
                 "--sandbox",
                 "read-only",
                 "--ephemeral",
-                "--output-schema",
             ]
             .map(String::from)
             .to_vec();
             args.extend([
+                "--output-schema".into(),
                 schema_file.to_string_lossy().into_owned(),
+            ]);
+            if !job.input.model.is_empty() {
+                args.extend(["--model".into(), job.input.model.clone()]);
+            }
+            args.extend([
                 "--output-last-message".into(),
                 output.to_string_lossy().into_owned(),
                 "-".into(),
@@ -201,17 +305,17 @@ pub fn generate(job: &Job, paths: &Paths, cancel: &AtomicBool) -> Result<Value, 
                 "--disable-slash-commands",
                 "--output-format",
                 "json",
-                "--json-schema",
             ]
             .map(String::from)
             .to_vec();
             args.extend([
+                "--json-schema".into(),
                 schema_file.to_string_lossy().into_owned(),
-                "--print-timeout".into(),
-                "10m".into(),
-                "-p".into(),
-                prompt,
             ]);
+            if !job.input.model.is_empty() {
+                args.extend(["--model".into(), job.input.model.clone()]);
+            }
+            args.extend(["--print-timeout".into(), "10m".into(), "-p".into(), prompt]);
             (resolve("agy", &paths.antigravity)?, String::new())
         }
         _ => return Err("Unsupported provider".into()),
@@ -257,6 +361,135 @@ pub fn generate(job: &Job, paths: &Paths, cancel: &AtomicBool) -> Result<Value, 
     };
     parse_result(&job.task, value)
 }
+pub fn generate_image(
+    job: &Job,
+    paths: &Paths,
+    references: &Value,
+    cancel: &AtomicBool,
+) -> Result<Value, String> {
+    if job.task != "image" || job.input.prompt.trim().is_empty() || job.input.prompt.len() > 8000 {
+        return Err("Invalid image job".into());
+    }
+    let allowed = if job.provider == "codex" {
+        vec!["imagegen"]
+    } else if job.provider == "antigravity" {
+        vec![
+            "gemini-3-pro-image",
+            "gemini-3.1-flash-image",
+            "gemini-3.1-flash-lite-image",
+            "gemini-2.5-flash-image",
+        ]
+    } else {
+        return Err("Unsupported provider".into());
+    };
+    if !allowed.contains(&job.input.model.as_str()) {
+        return Err("Unsupported image model".into());
+    }
+    let refs = references["references"]
+        .as_array()
+        .ok_or("Missing image references")?;
+    if refs.is_empty() || refs.len() > 2 {
+        return Err("Invalid image references".into());
+    }
+    let dir = tempfile::tempdir().map_err(|_| "Cannot create workspace")?;
+    let mut files = Vec::new();
+    for (i, reference) in refs.iter().enumerate() {
+        let mime = reference["mime"].as_str().ok_or("Invalid reference type")?;
+        let extension = match mime {
+            "image/png" => "png",
+            "image/jpeg" => "jpg",
+            "image/webp" => "webp",
+            _ => return Err("Invalid reference type".into()),
+        };
+        let bytes = STANDARD
+            .decode(reference["data"].as_str().ok_or("Missing reference data")?)
+            .map_err(|_| "Invalid reference data")?;
+        if bytes.is_empty() || bytes.len() > 8_000_000 {
+            return Err("Invalid reference size".into());
+        }
+        let name = format!("{}.{extension}", if i == 0 { "reference" } else { "logo" });
+        std::fs::write(dir.path().join(&name), bytes).map_err(|_| "Cannot save image reference")?;
+        files.push(name);
+    }
+    let output = dir.path().join("final-slide.png");
+    let (bin, args) = if job.provider == "codex" {
+        let mut args = vec![
+            "exec".into(),
+            "--ephemeral".into(),
+            "--skip-git-repo-check".into(),
+            "--sandbox".into(),
+            "workspace-write".into(),
+            "--image".into(),
+        ];
+        args.extend(
+            files
+                .iter()
+                .map(|name| dir.path().join(name).to_string_lossy().into_owned()),
+        );
+        args.extend(["--".into(),format!("$imagegen\nUse built-in image generation to create exactly one finished image. Inspect the attached reference and logo images. Save the result as final-slide.png in the current working directory. Do not call an API manually or only describe the image.\n{}",job.input.prompt)]);
+        (resolve("codex", &paths.codex)?, args)
+    } else {
+        let names = if job.input.model == "gemini-3-pro-image" {
+            "Nano Banana Pro"
+        } else if job.input.model == "gemini-3.1-flash-image" {
+            "Nano Banana 2"
+        } else if job.input.model == "gemini-3.1-flash-lite-image" {
+            "Nano Banana 2 Lite"
+        } else {
+            "Nano Banana"
+        };
+        let instruction=format!("Call the native generate_image tool to make one final image. Request {names} ({}). Set ImageName exactly to final-slide.png and ImagePaths to {}. Keep the slide inside a 4:5 safe area. Save the image in the current working directory. Do not only describe it.\n{}",job.input.model,serde_json::to_string(&files).unwrap(),job.input.prompt);
+        (
+            resolve("agy", &paths.antigravity)?,
+            vec![
+                "--mode".into(),
+                "accept-edits".into(),
+                "--sandbox".into(),
+                "--dangerously-skip-permissions".into(),
+                "--disable-slash-commands".into(),
+                "--output-format".into(),
+                "json".into(),
+                "--print-timeout".into(),
+                "10m".into(),
+                "-p".into(),
+                instruction,
+            ],
+        )
+    };
+    let remaining = job.expires_at.saturating_sub(crate::engine::now());
+    if remaining == 0 {
+        return Err("Job expired".into());
+    }
+    let raw = run_limited(
+        &bin,
+        &args,
+        "",
+        dir.path(),
+        Duration::from_millis(remaining.min(600_000)),
+        cancel,
+        false,
+        24_000_000,
+    )?;
+    if job.provider == "antigravity" {
+        let envelope: Value =
+            serde_json::from_str(&raw).map_err(|_| "Invalid Antigravity response")?;
+        if envelope["status"] != "SUCCESS"
+            || envelope["denied_actions"]
+                .as_array()
+                .is_some_and(|a| !a.is_empty())
+        {
+            return Err("Antigravity image generation failed or was denied".into());
+        }
+    }
+    let bytes = std::fs::read(output).map_err(|_| "CLI did not create final-slide.png")?;
+    if bytes.len() < 10_000
+        || bytes.len() > 12_000_000
+        || !bytes.starts_with(&[137, 80, 78, 71, 13, 10, 26, 10])
+    {
+        return Err("CLI did not create a usable PNG image".into());
+    }
+    Ok(json!({"image":format!("data:image/png;base64,{}",STANDARD.encode(bytes))}))
+}
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -273,5 +506,54 @@ mod tests {
         )
         .is_err());
         assert!(parse_result("draft", json!({"slides":[]})).is_err());
+    }
+    #[test]
+    fn parses_available_models() {
+        let models = parse_agy_models("Fetching available models...\ngemini-3.8-flash-high\tGemini 3.8 Flash (High)\nclaude-sonnet-4-6\tClaude Sonnet 4.6");
+        assert_eq!(models.len(), 2);
+        assert_eq!(models[0].id, "gemini-3.8-flash-high");
+    }
+    #[cfg(unix)]
+    #[test]
+    fn local_image_job_returns_generated_png() {
+        use std::os::unix::fs::PermissionsExt;
+        let work = tempfile::tempdir().unwrap();
+        let png = work.path().join("fixture.png");
+        let mut bytes = vec![0; 12_000];
+        bytes[..8].copy_from_slice(&[137, 80, 78, 71, 13, 10, 26, 10]);
+        std::fs::write(&png, bytes).unwrap();
+        let cli = work.path().join("fake-codex");
+        std::fs::write(
+            &cli,
+            format!("#!/bin/sh\ncp '{}' final-slide.png\n", png.display()),
+        )
+        .unwrap();
+        std::fs::set_permissions(&cli, std::fs::Permissions::from_mode(0o700)).unwrap();
+        let job = Job {
+            id: uuid::Uuid::nil(),
+            provider: "codex".into(),
+            task: "image".into(),
+            input: Input {
+                prompt: "Create a slide".into(),
+                model: "imagegen".into(),
+            },
+            lease: "test".into(),
+            expires_at: crate::engine::now() + 30_000,
+        };
+        let refs = json!({"references":[{"mime":"image/png","data":STANDARD.encode([137,80,78,71,13,10,26,10])}]});
+        let result = generate_image(
+            &job,
+            &Paths {
+                codex: cli.to_string_lossy().into_owned(),
+                antigravity: String::new(),
+            },
+            &refs,
+            &AtomicBool::new(false),
+        )
+        .unwrap();
+        assert!(result["image"]
+            .as_str()
+            .unwrap()
+            .starts_with("data:image/png;base64,"));
     }
 }

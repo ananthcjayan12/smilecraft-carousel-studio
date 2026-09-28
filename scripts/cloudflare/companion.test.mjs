@@ -7,13 +7,13 @@ import { companionRoute, enqueueCompanion } from '../../cloudflare/companion.mjs
 
 function fixture() {
   const sqlite = new Database(':memory:');
-  for (const name of ['0001_accounts_credits.sql','0002_studio.sql','0003_manual_plans.sql','0004_job_corrections.sql','0005_template_imports.sql','0006_companion.sql']) sqlite.exec(readFileSync(`cloudflare/migrations/${name}`,'utf8'));
+  for (const name of ['0001_accounts_credits.sql','0002_studio.sql','0003_manual_plans.sql','0004_job_corrections.sql','0005_template_imports.sql','0006_companion.sql','0007_companion_images.sql']) sqlite.exec(readFileSync(`cloudflare/migrations/${name}`,'utf8'));
   const DB = { prepare(sql) { return { bind(...args) { const statement=sqlite.prepare(sql); return {first:async()=>statement.get(...args),all:async()=>({results:statement.all(...args)}),run:async()=>({meta:statement.run(...args)}),execute:()=>({meta:statement.run(...args)})}; } }; }, batch(stmts) { return Promise.resolve(sqlite.transaction(()=>stmts.map(s=>s.execute()))()); } };
   sqlite.exec("INSERT INTO accounts(id,name,companion_enabled) VALUES('a','Test',1); INSERT INTO users(id,identity_provider,identity_subject,email) VALUES('u','test','u','user@example.com'); INSERT INTO memberships(account_id,user_id,role) VALUES('a','u','owner'); INSERT INTO clients(id,account_id,name,business_pack_id,profile_json,brand_json,created_at,updated_at) VALUES('c','a','Clinic','dental','{}','{}','2026-09-28','2026-09-28');");
   return {sqlite,env:{DB,APP_ORIGIN:'https://test.example'},viewer:{account_id:'a',user_id:'u',email:'user@example.com'}};
 }
 const route=(env,viewer,path,method='GET',body,token)=>{const url=new URL(`https://test.example/api/companion${path}`);return companionRoute(new Request(url,{method,headers:token?{Authorization:`Bearer ${token}`}:{},body:body?JSON.stringify(body):undefined}),env,viewer,url);};
-const caps={codex:{installed:true,ready:true,version:'1',detail:'Ready'},antigravity:{installed:false,ready:false,version:'',detail:'Not found'}};
+const caps={codex:{installed:true,ready:true,version:'1',detail:'Ready',models:[{id:'gpt-6-sol',label:'GPT-6 Sol'}],imageModels:[{id:'imagegen',label:'Codex ImageGen'}]},antigravity:{installed:false,ready:false,version:'',detail:'Not found',models:[],imageModels:[]}};
 
 test('flagged account pairs, polls, completes a draft and can revoke device',async()=>{
   const {sqlite,env,viewer}=fixture();
@@ -76,5 +76,47 @@ test('cancelling a leased job makes the next heartbeat inactive',async()=>{
   const path=new URL(`https://test.example/api/clients/c/projects/${project.id}/jobs/${job.id}`);
   assert.equal((await apiRoute(new Request(path,{method:'DELETE'}),env,viewer,path)).status,200);
   assert.equal((await (await route(env,null,`/jobs/${job.id}/heartbeat`,'POST',{lease:job.lease},device.token)).json()).active,false);
+  sqlite.close();
+});
+
+test('selected local model is delivered to the companion',async()=>{
+  const {sqlite,env,viewer}=fixture();
+  const pair=await (await route(env,viewer,'/devices/pairing','POST',{})).json();
+  const device=await (await route(env,null,'/pair','POST',{code:pair.code,name:'Laptop'})).json();
+  await route(env,null,'/poll','POST',caps,device.token);
+  const url=new URL('https://test.example/api/clients/c/projects');
+  const project=(await (await apiRoute(new Request(url,{method:'POST',body:JSON.stringify({topic:'Topic'})}),env,viewer,url)).json()).project;
+  await assert.rejects(()=>enqueueCompanion(env,viewer,project,{stage:'draft',provider:'codex',model:'unknown',idempotencyKey:crypto.randomUUID()}),{status:409});
+  await enqueueCompanion(env,viewer,project,{stage:'draft',provider:'codex',model:'gpt-6-sol',idempotencyKey:crypto.randomUUID()});
+  const job=(await (await route(env,null,'/poll','POST',caps,device.token)).json()).job;
+  assert.equal(job.input.model,'gpt-6-sol');
+  sqlite.close();
+});
+
+test('local image model receives its reference and saves generated artwork',async()=>{
+  const {sqlite,env,viewer}=fixture();
+  const objects=new Map();
+  env.STATIC={fetch:async()=>new Response(new Uint8Array([137,80,78,71,13,10,26,10]),{headers:{'content-type':'image/png'}})};
+  env.ASSETS={put:async(key,bytes)=>objects.set(key,bytes),get:async(key)=>objects.has(key)?{arrayBuffer:async()=>objects.get(key)}:null,delete:async(key)=>objects.delete(key)};
+  const pair=await (await route(env,viewer,'/devices/pairing','POST',{})).json();
+  const device=await (await route(env,null,'/pair','POST',{code:pair.code,name:'Laptop'})).json();
+  await route(env,null,'/poll','POST',caps,device.token);
+  const url=new URL('https://test.example/api/clients/c/projects');
+  const project=(await (await apiRoute(new Request(url,{method:'POST',body:JSON.stringify({topic:'Topic'})}),env,viewer,url)).json()).project;
+  const data=JSON.parse(sqlite.prepare('SELECT project_json FROM projects WHERE id=?').get(project.id).project_json);
+  data.templateId='builtin:dental:neutral:1.0.0';
+  data.slides[0].approved=true;
+  sqlite.prepare('UPDATE projects SET project_json=? WHERE id=?').run(JSON.stringify(data),project.id);
+  const current=await getProject(env,'a','c',project.id);
+  await assert.rejects(()=>enqueueCompanion(env,viewer,current,{stage:'image',slideIndex:0,provider:'codex',model:'gpt-6-sol',idempotencyKey:crypto.randomUUID()}),{status:400});
+  await enqueueCompanion(env,viewer,current,{stage:'image',slideIndex:0,provider:'codex',model:'imagegen',idempotencyKey:crypto.randomUUID()});
+  const job=(await (await route(env,null,'/poll','POST',caps,device.token)).json()).job;
+  assert.equal(job.task,'image');assert.equal(job.input.model,'imagegen');
+  const refs=await (await route(env,null,`/jobs/${job.id}/references`,'POST',{lease:job.lease},device.token)).json();
+  assert.equal(refs.references[0].name,'reference');
+  const image='data:image/png;base64,'+Buffer.from([137,80,78,71,13,10,26,10,1,2,3]).toString('base64');
+  assert.equal((await route(env,null,`/jobs/${job.id}/complete`,'POST',{lease:job.lease,result:{image}},device.token)).status,200);
+  const saved=await getProject(env,'a','c',project.id);
+  assert.ok(saved.slides[0].artworkAssetId);assert.equal(saved.slides[0].artworkProvider,'codex');assert.equal(objects.size,1);
   sqlite.close();
 });

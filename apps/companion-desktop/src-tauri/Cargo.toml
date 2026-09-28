@@ -24,6 +24,7 @@ url = "2"
 regex = "1"
 dirs = "6"
 uuid = { version = "1", features = ["serde"] }
+base64 = "0.22"
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"

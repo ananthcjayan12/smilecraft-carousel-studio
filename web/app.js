@@ -139,6 +139,7 @@ async function client(id) {
 }
 async function project(id) {
   S.p = (await api(`/api/clients/${S.client.id}/projects/${id}`)).project;
+  if (S.me?.companionEnabled) S.companionDevices = (await api('/api/companion/devices')).devices;
   S.p.language ||= S.p.contextSnapshot?.language || "english";
   S.customLanguage = !(pk(S.client.businessPackId).languages || []).some(
     (language) => language.id === S.p.language,
@@ -268,7 +269,7 @@ function library() {
   return `<div class="intro"><span>LIBRARY</span><h1>Styles and creative references.</h1><p>Shared styles are available to compatible client types.</p></div>${styles(S.shared)}`;
 }
 function settings() {
-  const companion = S.me?.companionEnabled ? `<section class="card form"><h2>AI on your computer</h2><p><a href="https://github.com/ananthcjayan12/smilecraft-carousel-studio/releases/latest" target="_blank" rel="noopener noreferrer">Download Smilecraft Companion</a></p><p>Use your signed-in Codex or Antigravity CLI for carousel writing. Keep Smilecraft Companion running while generating. Local writing uses your CLI subscription and costs 0 Smilecraft credits.</p><button class="btn" data-a="pair-code">Create pairing code</button>${S.pairing ? `<p>One-time code (expires in 5 minutes): <code>${E(S.pairing.code)}</code></p>` : ''}<p class="muted">In the companion, enter this website URL and the code above. Then select the local writing provider in a carousel.</p>${S.companionDevices.map(d=>`<div class="row" style="margin:12px 0;gap:12px;align-items:center"><span><b>${E(d.name)}</b><small style="display:block">${d.online?'Online':'Offline'} · Codex ${d.capabilities?.codex?.ready?'ready':'unavailable'} · Antigravity ${d.capabilities?.antigravity?.ready?'ready':'unavailable'}</small></span><button class="btn" data-a="revoke-device" data-id="${E(d.id)}">Revoke</button></div>`).join('')}</section>` : '';
+  const companion = S.me?.companionEnabled ? `<section class="card form"><h2>AI on your computer</h2><p><a href="https://github.com/ananthcjayan12/smilecraft-carousel-studio/releases/latest" target="_blank" rel="noopener noreferrer">Download Smilecraft Companion</a></p><p>Use your signed-in Codex or Antigravity CLI for carousel writing and slide images. Keep Smilecraft Companion running while generating. Local generation uses your CLI subscription and costs 0 Smilecraft credits.</p><button class="btn" data-a="pair-code">Create pairing code</button>${S.pairing ? `<p>One-time code (expires in 5 minutes): <code>${E(S.pairing.code)}</code></p>` : ''}<p class="muted">In the companion, enter this website URL and the code above. Then select the local provider in a carousel.</p>${S.companionDevices.map(d=>`<div class="row" style="margin:12px 0;gap:12px;align-items:center"><span><b>${E(d.name)}</b><small style="display:block">${d.online?'Online':'Offline'} · Codex ${d.capabilities?.codex?.ready?'ready':'unavailable'} · Antigravity ${d.capabilities?.antigravity?.ready?'ready':'unavailable'}</small></span><button class="btn" data-a="revoke-device" data-id="${E(d.id)}">Revoke</button></div>`).join('')}</section>` : '';
   const admin = S.me?.isAdmin ? `<section class="card form"><h2>Assign plans and credits</h2><p class="muted">Each account gets its plan credits once per month. Repeat allocations for the same month are safe.</p><label>Allocation month<input class="control" id="allocation-month" type="month" value="${new Date().toISOString().slice(0, 7)}"></label>${S.adminAccounts.map(account => `<div class="row" style="margin:12px 0;gap:12px;align-items:center"><span><b>${E(account.name)}</b><small style="display:block">${E(account.email)}</small></span><select class="control" id="plan-${E(account.id)}"><option value="access" ${account.planId === 'access' ? 'selected' : ''}>Access · 0</option><option value="starter" ${account.planId === 'starter' ? 'selected' : ''}>Starter · 100</option><option value="pro" ${account.planId === 'pro' ? 'selected' : ''}>Pro · 500</option></select><button class="btn" data-a="allocate" data-id="${E(account.id)}">Allocate</button><button class="btn" data-a="toggle-companion" data-id="${E(account.id)}" data-enabled="${account.companionEnabled?1:0}">${account.companionEnabled?'Disable companion':'Enable companion'}</button></div>`).join('')}</section>` : '';
   return `<div class="intro"><span>SETTINGS</span><h1>Workspace settings.</h1><p>${E(S.me?.user?.email || '')}</p></div><section class="card form"><h2>${E(S.me?.credits ?? 0)} credits available</h2><p class="muted">Plan: ${E(S.me?.plan?.planId || 'access')}. A cloud five-slide draft costs 2 credits, a cloud rewrite costs 1, and each generated image or style costs 10.</p><p class="muted">OpenAI and Gemini keys are managed by the service owner in the cloud.</p><button class="btn" data-a="logout">Sign out</button></section>${companion}${admin}`;
 }
@@ -302,7 +303,9 @@ function writingControls() {
       writingProvider: "openai",
       writingModel: "gpt-5.6-sol",
     });
-  const models = ['codex','antigravity'].includes(g.writingProvider) ? [['','CLI default']] : WRITING_MODELS[g.writingProvider] || [];
+  const local = ['codex','antigravity'].includes(g.writingProvider);
+  const discovered = local ? [...new Map(S.companionDevices.filter(d=>d.online && d.capabilities?.[g.writingProvider]?.ready).flatMap(d=>d.capabilities[g.writingProvider].models || []).map(m=>[m.id,[m.id,m.label]])).values()] : [];
+  const models = local ? [['','CLI default'], ...discovered] : WRITING_MODELS[g.writingProvider] || [];
   return `<div class="model-panel"><label>Writing provider<select class="control" data-g="writingProvider">${Object.keys(
     { openai: WRITING_MODELS.openai, gemini: WRITING_MODELS.gemini, ...(S.me?.companionEnabled ? {codex: WRITING_MODELS.codex, antigravity: WRITING_MODELS.antigravity} : {}) },
   )
@@ -321,13 +324,17 @@ function imageControls() {
       provider: "openai",
       model: "gpt-image-2",
     });
-  const models = IMAGE_MODELS[g.provider] || [];
+  const local = ['codex','antigravity'].includes(g.provider);
+  const localModels = local ? [...new Map(S.companionDevices.filter(d=>d.online && d.capabilities?.[g.provider]?.ready).flatMap(d=>d.capabilities[g.provider].imageModels || []).map(m=>[m.id,[m.id,m.label]])).values()] : [];
+  const models = local ? (localModels.length ? localModels : [['','Start the companion to load image models']]) : IMAGE_MODELS[g.provider] || [];
+  const available = id => ['codex','antigravity'].includes(id) ? Boolean(S.me?.companionEnabled && S.companionDevices.some(d=>d.online && d.capabilities?.[id]?.ready && d.capabilities[id].imageModels?.length)) : Boolean(S.status.imageProviders?.[id]?.available);
+  const label = id => ['codex','antigravity'].includes(id) ? `${id==='codex'?'Codex':'Antigravity'} on your computer` : S.status.imageProviders?.[id]?.label || id;
   return `<div class="model-panel"><label>Image provider<select class="control" data-g="provider" ${S.busy ? "disabled" : ""}>${Object.keys(
-    { openai: IMAGE_MODELS.openai, gemini: IMAGE_MODELS.gemini },
+    { openai: IMAGE_MODELS.openai, gemini: IMAGE_MODELS.gemini, ...(S.me?.companionEnabled ? {codex: IMAGE_MODELS.codex,antigravity: IMAGE_MODELS.antigravity} : {}) },
   )
     .map(
       (id) =>
-        `<option value="${id}" ${id === g.provider ? "selected" : ""} ${S.status.imageProviders?.[id]?.available ? "" : "disabled"}>${E(S.status.imageProviders?.[id]?.label || id)}${S.status.imageProviders?.[id]?.available ? "" : " — unavailable"}</option>`,
+        `<option value="${id}" ${id === g.provider ? "selected" : ""} ${available(id) ? "" : "disabled"}>${E(label(id))}${available(id) ? "" : " — unavailable"}</option>`,
     )
     .join(
       "",
@@ -484,7 +491,7 @@ async function job(stage, extra = {}) {
         ...extra,
         idempotencyKey: crypto.randomUUID(),
       });
-    if (r.job) { if (["codex","antigravity"].includes(g.writingProvider) && stage !== "image") { S.activeLocalJobId = r.job.id; render(); } await waitForJob(r.job.id); }
+    if (r.job) { if (["codex","antigravity"].includes(stage === 'image' ? g.provider : g.writingProvider)) { S.activeLocalJobId = r.job.id; render(); } await waitForJob(r.job.id); }
     else if (r.project) S.p = r.project;
     S.me = await api('/api/me');
     if (stage === "image") S.imageProgress.completed = 1;
@@ -564,6 +571,7 @@ async function act(n) {
       S.p.notes = `Goal: ${S.create.goal}\n${S.create.facts}`;
       await save();
       S.view = "studio";
+      if (S.me?.companionEnabled) S.companionDevices = (await api('/api/companion/devices')).devices;
       return render();
     }
     if (a === "tab") {
@@ -648,6 +656,7 @@ async function act(n) {
     }
     if (a === "stage") {
       S.p.stage = +n.dataset.v;
+      if (S.p.stage === 1 && S.me?.companionEnabled) S.companionDevices = (await api('/api/companion/devices')).devices;
       later();
       return render();
     }
@@ -867,8 +876,12 @@ root.onchange = async (e) => {
       g[x.dataset.g] = x.value;
       if (x.dataset.g === "writingProvider")
         g.writingModel = ["codex","antigravity"].includes(x.value) ? "" : WRITING_MODELS[x.value]?.[0]?.[0] || "";
+      if (x.dataset.g === "writingProvider" && ["codex","antigravity"].includes(x.value) && S.me?.companionEnabled)
+        S.companionDevices = (await api('/api/companion/devices')).devices;
+      if (x.dataset.g === "provider" && ["codex","antigravity"].includes(x.value) && S.me?.companionEnabled)
+        S.companionDevices = (await api('/api/companion/devices')).devices;
       if (x.dataset.g === "provider")
-        g.model = IMAGE_MODELS[x.value]?.[0]?.[0] || "";
+        g.model = ["codex","antigravity"].includes(x.value) ? (S.companionDevices.find(d=>d.online && d.capabilities?.[x.value]?.ready)?.capabilities[x.value].imageModels?.[0]?.id || '') : IMAGE_MODELS[x.value]?.[0]?.[0] || "";
       later();
       render();
     }

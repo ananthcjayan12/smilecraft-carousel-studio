@@ -125,6 +125,11 @@ impl Engine {
             .client
             .post(format!("{}/api/companion{path}", c.origin))
             .json(&body);
+        if path.ends_with("/references")
+            || (path.ends_with("/complete") && body["result"]["image"].is_string())
+        {
+            req = req.timeout(Duration::from_secs(60));
+        }
         if !c.token.is_empty() {
             req = req.bearer_auth(&c.token);
         }
@@ -147,14 +152,19 @@ impl Engine {
         }
         use std::io::Read;
         let mut bytes = Vec::new();
+        let limit = if path.ends_with("/references") {
+            22_000_000
+        } else {
+            65536
+        };
         response
-            .take(65537)
+            .take(limit + 1)
             .read_to_end(&mut bytes)
             .map_err(|_| ApiError {
                 code: 0,
                 message: "Incomplete response".into(),
             })?;
-        if bytes.len() > 65536 {
+        if bytes.len() > limit as usize {
             return Err(ApiError {
                 code: 0,
                 message: "Response exceeds size limit".into(),
@@ -266,7 +276,17 @@ impl Engine {
                     }
                 }
             });
-            let r = providers::generate(&job, &c.paths, &self.cancel);
+            let r = if job.task == "image" {
+                self.request(
+                    c,
+                    &format!("/jobs/{}/references", job.id),
+                    json!({"lease":job.lease}),
+                )
+                .map_err(|e| e.message)
+                .and_then(|refs| providers::generate_image(&job, &c.paths, &refs, &self.cancel))
+            } else {
+                providers::generate(&job, &c.paths, &self.cancel)
+            };
             done.store(true, Ordering::SeqCst);
             r
         });

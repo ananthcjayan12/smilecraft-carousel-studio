@@ -110,6 +110,28 @@ pub fn run(
     cancel: &AtomicBool,
     stderr_output: bool,
 ) -> Result<String, String> {
+    run_limited(
+        bin,
+        args,
+        input,
+        cwd,
+        timeout,
+        cancel,
+        stderr_output,
+        512_000,
+    )
+}
+
+pub fn run_limited(
+    bin: &Path,
+    args: &[String],
+    input: &str,
+    cwd: &Path,
+    timeout: Duration,
+    cancel: &AtomicBool,
+    stderr_output: bool,
+    max_output: usize,
+) -> Result<String, String> {
     if cancel.load(Ordering::SeqCst) {
         return Err("Cancelled".into());
     }
@@ -191,7 +213,7 @@ pub fn run(
         match rx.recv_timeout(Duration::from_millis(40)) {
             Ok((err, chunk)) => {
                 size += chunk.len();
-                if size > 512_000 {
+                if size > max_output {
                     failure = Some("CLI output limit exceeded".into());
                     break;
                 }

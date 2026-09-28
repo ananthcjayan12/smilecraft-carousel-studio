@@ -31,7 +31,18 @@ async function refresh() {
         const card=document.createElement('article');const title=document.createElement('strong');title.textContent=name==='codex'?'Codex':'Antigravity';
         const badge=document.createElement('span');badge.className=c.ready?'badge ready':'badge';badge.textContent=c.ready?'Ready':(c.installed?'Needs attention':'Not found');
         const detail=document.createElement('p');detail.textContent=c.detail;const version=document.createElement('small');version.textContent=c.version;
-        card.append(title,badge,detail,version);return card;
+        card.append(title,badge,detail,version);
+        if (c.models?.length) {
+          const models=document.createElement('p');
+          models.textContent=`Writing models: ${c.models.map(m=>m.label).join(', ')}`;
+          card.append(models);
+        }
+        if (c.imageModels?.length) {
+          const models=document.createElement('p');
+          models.textContent=`Image generation: ${c.imageModels.map(m=>m.label).join(', ')}`;
+          card.append(models);
+        }
+        return card;
       });$('providers').replaceChildren(...nodes);
     }
   } catch { $('message').textContent = 'Cannot communicate with the companion.'; }
