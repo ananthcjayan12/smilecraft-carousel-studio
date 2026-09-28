@@ -1,0 +1,1 @@
+Smilecraft Companion connects a signed-in Codex or Antigravity CLI to a Smilecraft account with Companion access enabled. It supports five-slide carousel drafts and single-slide revisions. Pair from website Settings, then select a local writing provider in a carousel. Local writing uses no Smilecraft credits. Image generation remains available through cloud API providers.

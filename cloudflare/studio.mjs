@@ -1,6 +1,7 @@
 import { publicBusinessPacks, getBusinessPack, resolveBusinessContext, starterSlidesForPack } from '../server/business-packs.mjs';
 import { repairGeneration } from '../web/studio-controls.js';
 import { runJob } from './generation.mjs';
+import { enqueueCompanion } from './companion.mjs';
 import { templateImportRoute } from './template-import.mjs';
 import { renderStyleBoard } from './style-maker.mjs';
 
@@ -59,12 +60,12 @@ export async function apiRoute(request, env, viewer, url) {
   const body = async () => { const data = await request.json(); if (!data || typeof data !== 'object' || Array.isArray(data)) throw Object.assign(new Error('Expected a JSON object.'), { status: 400 }); return data; };
   if (url.pathname === '/api/me' && method === 'GET') {
     const subscription = await first(env.DB, 'SELECT plan_id AS planId,period_start AS periodStart FROM subscriptions WHERE account_id=?', accountId);
-    return json({ user: { id: viewer.user_id, email: viewer.email }, account: { id: accountId, role: viewer.role }, plan: subscription || { planId: 'access' }, isAdmin: Boolean(env.ADMIN_EMAIL && viewer.email.toLowerCase() === env.ADMIN_EMAIL.toLowerCase()), csrf: viewer.csrf, credits: await balance(env, accountId) });
+    return json({ user: { id: viewer.user_id, email: viewer.email }, account: { id: accountId, role: viewer.role }, plan: subscription || { planId: 'access' }, isAdmin: Boolean(env.ADMIN_EMAIL && viewer.email.toLowerCase() === env.ADMIN_EMAIL.toLowerCase()), csrf: viewer.csrf, credits: await balance(env, accountId), companionEnabled: Boolean((await first(env.DB,'SELECT companion_enabled FROM accounts WHERE id=?',accountId))?.companion_enabled) });
   }
   if (url.pathname === '/api/plans' && method === 'GET') return json({ plans: await all(env.DB, 'SELECT id,version,monthly_credits AS monthlyCredits FROM plans WHERE active=1 ORDER BY monthly_credits') });
   if (url.pathname === '/api/admin/accounts' && method === 'GET') {
     if (!env.ADMIN_EMAIL || viewer.email.toLowerCase() !== env.ADMIN_EMAIL.toLowerCase()) return bad('Not authorized.', 403);
-    const accounts = await all(env.DB, 'SELECT a.id,a.name,u.email,s.plan_id AS planId FROM accounts a JOIN memberships m ON m.account_id=a.id AND m.role=\'owner\' JOIN users u ON u.id=m.user_id LEFT JOIN subscriptions s ON s.account_id=a.id ORDER BY a.created_at DESC LIMIT 500');
+    const accounts = await all(env.DB, 'SELECT a.id,a.name,u.email,s.plan_id AS planId,a.companion_enabled AS companionEnabled FROM accounts a JOIN memberships m ON m.account_id=a.id AND m.role=\'owner\' JOIN users u ON u.id=m.user_id LEFT JOIN subscriptions s ON s.account_id=a.id ORDER BY a.created_at DESC LIMIT 500');
     return json({ accounts });
   }
   if (parts[0] === 'api' && parts[1] === 'admin' && parts[2] === 'accounts' && parts[3] && parts[4] === 'allocate' && method === 'POST') {
@@ -82,10 +83,21 @@ export async function apiRoute(request, env, viewer, url) {
     ]);
     return json({ accountId: target.id, planId: plan.id, credits: await balance(env, target.id) });
   }
+  if (parts[0] === 'api' && parts[1] === 'admin' && parts[2] === 'accounts' && parts[3] && parts[4] === 'companion' && method === 'PATCH') {
+    if (!env.ADMIN_EMAIL || viewer.email.toLowerCase() !== env.ADMIN_EMAIL.toLowerCase()) return bad('Not authorized.',403);
+    const input=await body();
+    if (typeof input.enabled !== 'boolean') return bad('Expected an enabled flag.');
+    const changed=await env.DB.prepare('UPDATE accounts SET companion_enabled=? WHERE id=?').bind(input.enabled?1:0,parts[3]).run();
+    if (!changed.meta.changes) return bad('Account not found.',404);
+    if (!input.enabled) await env.DB.prepare("UPDATE companion_jobs SET status='cancelled',error='Companion access disabled.' WHERE account_id=? AND status IN ('queued','running')").bind(parts[3]).run();
+    return json({enabled:input.enabled});
+  }
   if (url.pathname === '/api/business-packs' && method === 'GET') return json({ packs: publicBusinessPacks() });
   if (url.pathname === '/api/status' && method === 'GET') {
     const openai = { available: Boolean(env.OPENAI_API_KEY), label: 'OpenAI API' }, gemini = { available: Boolean(env.GEMINI_API_KEY), label: 'Gemini API' };
-    return json({ cloud: true, textProviders: { openai, gemini }, imageProviders: { openai, gemini } });
+    const enabled=Boolean((await first(env.DB,'SELECT companion_enabled FROM accounts WHERE id=?',accountId))?.companion_enabled);
+    const local=enabled ? {codex:{available:true,label:'Codex on your computer'},antigravity:{available:true,label:'Antigravity on your computer'}} : {};
+    return json({ cloud: true, companionEnabled:enabled, textProviders: { openai, gemini, ...local }, imageProviders: { openai, gemini } });
   }
   if (url.pathname === '/api/dashboard' && method === 'GET') {
     const [clients, projects, jobs] = await Promise.all([
@@ -216,13 +228,17 @@ export async function apiRoute(request, env, viewer, url) {
       await env.DB.prepare('UPDATE projects SET context_json=?,project_json=?,revision=revision+1,updated_at=? WHERE id=? AND account_id=? AND revision=?').bind(JSON.stringify(context), JSON.stringify(next), now(), projectId, accountId, project.revision).run();
       return json({ project: await getProject(env, accountId, clientId, projectId) });
     }
+    if (parts[5] === 'jobs' && parts[6] && method === 'DELETE') {
+      const changed=await env.DB.prepare("UPDATE companion_jobs SET status='cancelled',error='Generation cancelled.' WHERE id=? AND account_id=? AND project_id=? AND status IN ('queued','running')").bind(parts[6],accountId,projectId).run();
+      return changed.meta.changes ? json({ok:true}) : bad('Local job is no longer active.',409);
+    }
     if (parts[5] === 'jobs' && parts[6] && method === 'GET') {
       const row = await first(env.DB, 'SELECT * FROM generation_jobs WHERE account_id=? AND project_id=? AND id=?', accountId, projectId, parts[6]);
-      if (!row) return bad('Job not found.', 404);
+      if (!row) { const local=await first(env.DB,'SELECT id,status,error FROM companion_jobs WHERE account_id=? AND project_id=? AND id=?',accountId,projectId,parts[6]); if (!local) return bad('Job not found.',404); return json({job:{id:local.id,status:local.status,error:local.error||'',quotedCredits:0}}); }
       return json({ job: { id: row.id, status: row.status, error: row.error || '', quotedCredits: row.quoted_credits } });
     }
     if (parts[5] === 'jobs' && method === 'GET') return json({ jobs: (await all(env.DB, 'SELECT id,slide_index AS slideIndex,action AS stage,provider,model_id AS model,status,1 AS attempt,error,created_at AS createdAt,started_at AS startedAt,finished_at AS finishedAt FROM generation_jobs WHERE account_id=? AND project_id=? ORDER BY created_at DESC LIMIT 100', accountId, projectId)) });
-    if (parts[5] === 'jobs' && method === 'POST') return json(await runJob(env, accountId, clientId, project, await body()));
+    if (parts[5] === 'jobs' && method === 'POST') { const input=await body(); return json(['codex','antigravity'].includes(input.provider) ? await enqueueCompanion(env,viewer,project,input) : await runJob(env, accountId, clientId, project, input)); }
   }
   return bad('API route not found.', 404);
 }

@@ -12,7 +12,8 @@ test('saved provider/model mismatches are repaired without changing valid select
   assert.equal(repairGeneration({ provider: 'gemini', model: 'gpt-image-2' }).model, 'gemini-3.1-flash-image');
   assert.equal(repairGeneration({ provider: 'openai', model: 'gpt-5.6-sol' }).model, 'gpt-image-2');
   assert.equal(repairGeneration({ provider: 'codex', model: 'gpt-5.6-terra' }).model, 'gpt-image-2');
-  assert.equal(repairGeneration({ writingProvider: 'codex' }).writingProvider, 'openai');
+  assert.equal(repairGeneration({ writingProvider: 'codex' }).writingProvider, 'codex');
+  assert.equal(repairGeneration({ writingProvider: 'codex' }).writingModel, '');
   assert.equal(repairGeneration({ writingProvider: 'claude', writingModel: 'gpt-5.6-sol' }).writingModel, 'claude-sonnet-4-6');
   assert.equal(compatibleModel('antigravity', 'gemini-3.8-flash-high', 'image'), 'gemini-3-pro-image');
   assert.equal(compatibleModel('antigravity', 'gemini-3.1-flash-image', 'image'), 'gemini-3.1-flash-image');

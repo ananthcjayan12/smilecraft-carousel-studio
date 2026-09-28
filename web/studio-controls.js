@@ -2,8 +2,8 @@ import { IMAGE_MODELS, WRITING_MODELS, compatibleModel } from './provider-models
 
 export function repairGeneration(g = {}) {
   const provider = ['openai', 'gemini'].includes(g.provider) ? g.provider : 'openai';
-  const writingProvider = ['openai', 'gemini', 'claude'].includes(g.writingProvider) ? g.writingProvider : 'openai';
-  return { ...g, provider, writingProvider, model: compatibleModel(provider, g.model, 'image'), writingModel: compatibleModel(writingProvider, g.writingModel) };
+  const writingProvider = ['openai', 'gemini', 'claude', 'codex', 'antigravity'].includes(g.writingProvider) ? g.writingProvider : 'openai';
+  return { ...g, provider, writingProvider, model: compatibleModel(provider, g.model, 'image'), writingModel: ['codex', 'antigravity'].includes(writingProvider) ? '' : compatibleModel(writingProvider, g.writingModel) };
 }
 
 export function generationControls(g, status, kind, escape, agyModels = []) {

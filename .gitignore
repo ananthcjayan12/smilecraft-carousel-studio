@@ -25,3 +25,8 @@ wrangler.generated.json
 # Rust / Tauri generated build artifacts
 src-tauri/target/
 src-tauri/gen/schemas/
+
+apps/companion-desktop/src-tauri/target/
+apps/companion-desktop/src-tauri/gen/
+apps/companion-desktop/release-assets/
+apps/companion-desktop/src-tauri/release.config.json

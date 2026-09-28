@@ -11,7 +11,9 @@
     "cloudflare:prepare": "node scripts/cloudflare/provision.mjs",
     "cloudflare:deploy": "node scripts/cloudflare/deploy.mjs",
     "cloudflare:check": "wrangler deploy --dry-run --config wrangler.json --outdir .worker-build",
-    "cloudflare:smoke": "node scripts/cloudflare/smoke-test.mjs"
+    "cloudflare:smoke": "node scripts/cloudflare/smoke-test.mjs",
+    "companion:desktop": "npm run dev --workspace @smilecraft/companion-desktop",
+    "companion:build": "npm run build --workspace @smilecraft/companion-desktop --"
   },
   "dependencies": {
     "better-sqlite3": "^11.8.1",
@@ -24,5 +26,8 @@
   },
   "devDependencies": {
     "wrangler": "^4.142.0"
-  }
+  },
+  "workspaces": [
+    "apps/companion-desktop"
+  ]
 }

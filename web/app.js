@@ -21,6 +21,8 @@ const root = document.querySelector("#app"),
 let S = {
   me: null,
   adminAccounts: [],
+  companionDevices: [],
+  pairing: null,
   view: "home",
   packs: [],
   clients: [],
@@ -34,6 +36,7 @@ let S = {
   p: null,
   i: 0,
   busy: "",
+  activeLocalJobId: "",
   imageProgress: null,
   exportProgress: null,
   exportResult: null,
@@ -96,6 +99,7 @@ const status = (p) => {
 async function load() {
   S.me = await api('/api/me');
   S.adminAccounts = S.me.isAdmin ? (await api('/api/admin/accounts')).accounts : [];
+  S.companionDevices = S.me.companionEnabled ? (await api('/api/companion/devices')).devices : [];
   let [a, b, c, d, e, f] = await Promise.all([
     api("/api/business-packs"),
     api("/api/clients"),
@@ -264,8 +268,9 @@ function library() {
   return `<div class="intro"><span>LIBRARY</span><h1>Styles and creative references.</h1><p>Shared styles are available to compatible client types.</p></div>${styles(S.shared)}`;
 }
 function settings() {
-  const admin = S.me?.isAdmin ? `<section class="card form"><h2>Assign plans and credits</h2><p class="muted">Each account gets its plan credits once per month. Repeat allocations for the same month are safe.</p><label>Allocation month<input class="control" id="allocation-month" type="month" value="${new Date().toISOString().slice(0, 7)}"></label>${S.adminAccounts.map(account => `<div class="row" style="margin:12px 0;gap:12px;align-items:center"><span><b>${E(account.name)}</b><small style="display:block">${E(account.email)}</small></span><select class="control" id="plan-${E(account.id)}"><option value="access" ${account.planId === 'access' ? 'selected' : ''}>Access · 0</option><option value="starter" ${account.planId === 'starter' ? 'selected' : ''}>Starter · 100</option><option value="pro" ${account.planId === 'pro' ? 'selected' : ''}>Pro · 500</option></select><button class="btn" data-a="allocate" data-id="${E(account.id)}">Allocate</button></div>`).join('')}</section>` : '';
-  return `<div class="intro"><span>SETTINGS</span><h1>Workspace settings.</h1><p>${E(S.me?.user?.email || '')}</p></div><section class="card form"><h2>${E(S.me?.credits ?? 0)} credits available</h2><p class="muted">Plan: ${E(S.me?.plan?.planId || 'access')}. A five-slide draft costs 2 credits, a rewrite costs 1, and each generated image or style costs 10. The service owner assigns plans and credits. Payments are not enabled yet.</p><p class="muted">OpenAI and Gemini keys are managed by the service owner in the cloud.</p><button class="btn" data-a="logout">Sign out</button></section>${admin}`;
+  const companion = S.me?.companionEnabled ? `<section class="card form"><h2>AI on your computer</h2><p><a href="https://github.com/ananthcjayan12/smilecraft-carousel-studio/releases/latest" target="_blank" rel="noopener noreferrer">Download Smilecraft Companion</a></p><p>Use your signed-in Codex or Antigravity CLI for carousel writing. Keep Smilecraft Companion running while generating. Local writing uses your CLI subscription and costs 0 Smilecraft credits.</p><button class="btn" data-a="pair-code">Create pairing code</button>${S.pairing ? `<p>One-time code (expires in 5 minutes): <code>${E(S.pairing.code)}</code></p>` : ''}<p class="muted">In the companion, enter this website URL and the code above. Then select the local writing provider in a carousel.</p>${S.companionDevices.map(d=>`<div class="row" style="margin:12px 0;gap:12px;align-items:center"><span><b>${E(d.name)}</b><small style="display:block">${d.online?'Online':'Offline'} · Codex ${d.capabilities?.codex?.ready?'ready':'unavailable'} · Antigravity ${d.capabilities?.antigravity?.ready?'ready':'unavailable'}</small></span><button class="btn" data-a="revoke-device" data-id="${E(d.id)}">Revoke</button></div>`).join('')}</section>` : '';
+  const admin = S.me?.isAdmin ? `<section class="card form"><h2>Assign plans and credits</h2><p class="muted">Each account gets its plan credits once per month. Repeat allocations for the same month are safe.</p><label>Allocation month<input class="control" id="allocation-month" type="month" value="${new Date().toISOString().slice(0, 7)}"></label>${S.adminAccounts.map(account => `<div class="row" style="margin:12px 0;gap:12px;align-items:center"><span><b>${E(account.name)}</b><small style="display:block">${E(account.email)}</small></span><select class="control" id="plan-${E(account.id)}"><option value="access" ${account.planId === 'access' ? 'selected' : ''}>Access · 0</option><option value="starter" ${account.planId === 'starter' ? 'selected' : ''}>Starter · 100</option><option value="pro" ${account.planId === 'pro' ? 'selected' : ''}>Pro · 500</option></select><button class="btn" data-a="allocate" data-id="${E(account.id)}">Allocate</button><button class="btn" data-a="toggle-companion" data-id="${E(account.id)}" data-enabled="${account.companionEnabled?1:0}">${account.companionEnabled?'Disable companion':'Enable companion'}</button></div>`).join('')}</section>` : '';
+  return `<div class="intro"><span>SETTINGS</span><h1>Workspace settings.</h1><p>${E(S.me?.user?.email || '')}</p></div><section class="card form"><h2>${E(S.me?.credits ?? 0)} credits available</h2><p class="muted">Plan: ${E(S.me?.plan?.planId || 'access')}. A cloud five-slide draft costs 2 credits, a cloud rewrite costs 1, and each generated image or style costs 10.</p><p class="muted">OpenAI and Gemini keys are managed by the service owner in the cloud.</p><button class="btn" data-a="logout">Sign out</button></section>${companion}${admin}`;
 }
 function render() {
   let content =
@@ -288,7 +293,7 @@ function render() {
 }
 function studio() {
   let p = S.p;
-  return `<div class="studio-title"><button data-a="back">← Projects</button><h1>${E(p.topic || "New carousel")}</h1><p>${E(S.client.name)} · ${status(p)}</p></div><div class="steps">${["Brief", "Copy", "Style", "Review", "Export"].map((x, i) => `<button class="${p.stage === i ? "on" : ""}" data-a="stage" data-v="${i}">${i + 1}. ${x}</button>`).join("")}</div>${p.stage === 0 ? brief() : p.stage === 1 ? copy() : p.stage === 2 ? design() : p.stage === 3 ? review() : exportPage()}`;
+  return `<div class="studio-title"><button data-a="back">← Projects</button><h1>${E(p.topic || "New carousel")}</h1><p>${E(S.client.name)} · ${status(p)}</p></div><div class="steps">${["Brief", "Copy", "Style", "Review", "Export"].map((x, i) => `<button class="${p.stage === i ? "on" : ""}" data-a="stage" data-v="${i}">${i + 1}. ${x}</button>`).join("")}</div>${S.activeLocalJobId ? `<button class="btn" data-a="cancel-local-job">Cancel local generation</button>` : ""}${p.stage === 0 ? brief() : p.stage === 1 ? copy() : p.stage === 2 ? design() : p.stage === 3 ? review() : exportPage()}`;
 }
 function writingControls() {
   const g =
@@ -297,9 +302,9 @@ function writingControls() {
       writingProvider: "openai",
       writingModel: "gpt-5.6-sol",
     });
-  const models = WRITING_MODELS[g.writingProvider] || [];
+  const models = ['codex','antigravity'].includes(g.writingProvider) ? [['','CLI default']] : WRITING_MODELS[g.writingProvider] || [];
   return `<div class="model-panel"><label>Writing provider<select class="control" data-g="writingProvider">${Object.keys(
-    { openai: WRITING_MODELS.openai, gemini: WRITING_MODELS.gemini, claude: WRITING_MODELS.claude },
+    { openai: WRITING_MODELS.openai, gemini: WRITING_MODELS.gemini, ...(S.me?.companionEnabled ? {codex: WRITING_MODELS.codex, antigravity: WRITING_MODELS.antigravity} : {}) },
   )
     .map(
       (id) =>
@@ -479,7 +484,7 @@ async function job(stage, extra = {}) {
         ...extra,
         idempotencyKey: crypto.randomUUID(),
       });
-    if (r.job) await waitForJob(r.job.id);
+    if (r.job) { if (["codex","antigravity"].includes(g.writingProvider) && stage !== "image") { S.activeLocalJobId = r.job.id; render(); } await waitForJob(r.job.id); }
     else if (r.project) S.p = r.project;
     S.me = await api('/api/me');
     if (stage === "image") S.imageProgress.completed = 1;
@@ -488,19 +493,20 @@ async function job(stage, extra = {}) {
     toast(e.message);
   } finally {
     S.busy = "";
+    S.activeLocalJobId = "";
     S.imageProgress = null;
     render();
   }
 }
 async function waitForJob(id) {
   const base = `/api/clients/${S.client.id}/projects/${S.p.id}`;
-  for (let attempt = 0; attempt < 180; attempt++) {
+  for (let attempt = 0; attempt < 360; attempt++) {
     const { job: current } = await api(`${base}/jobs/${id}`);
     if (current.status === 'succeeded') {
       S.p = (await api(base)).project;
       return;
     }
-    if (['failed', 'cancelled'].includes(current.status)) throw Error(current.error || 'Generation failed. Credits were returned.');
+    if (['failed', 'cancelled', 'expired'].includes(current.status)) throw Error(current.error || 'Generation failed. Credits were returned.');
     await new Promise(resolve => setTimeout(resolve, 2000));
   }
   throw Error('Generation is still running. Reopen this project to see the result.');
@@ -776,6 +782,10 @@ async function act(n) {
       delete S.regenerationNotes[slideIndex];
       return render();
     }
+    if (a === 'cancel-local-job' && S.activeLocalJobId) { await api(`/api/clients/${S.client.id}/projects/${S.p.id}/jobs/${S.activeLocalJobId}`,undefined,'DELETE'); S.activeLocalJobId=''; return render(); }
+    if (a === 'pair-code') { S.pairing=await api('/api/companion/devices/pairing',{}); return render(); }
+    if (a === 'revoke-device') { await api(`/api/companion/devices/${n.dataset.id}`,undefined,'DELETE'); S.companionDevices=(await api('/api/companion/devices')).devices; return render(); }
+    if (a === 'toggle-companion') { const enabled=n.dataset.enabled!=='1'; await api(`/api/admin/accounts/${n.dataset.id}/companion`,{enabled},'PATCH'); S.adminAccounts=(await api('/api/admin/accounts')).accounts; S.me=await api('/api/me'); S.status=await api('/api/status'); return render(); }
     if (a === "export") {
       return await exportCarousel();
     }
@@ -856,7 +866,7 @@ root.onchange = async (e) => {
       const g = S.p.generation || (S.p.generation = {});
       g[x.dataset.g] = x.value;
       if (x.dataset.g === "writingProvider")
-        g.writingModel = WRITING_MODELS[x.value]?.[0]?.[0] || "";
+        g.writingModel = ["codex","antigravity"].includes(x.value) ? "" : WRITING_MODELS[x.value]?.[0]?.[0] || "";
       if (x.dataset.g === "provider")
         g.model = IMAGE_MODELS[x.value]?.[0]?.[0] || "";
       later();

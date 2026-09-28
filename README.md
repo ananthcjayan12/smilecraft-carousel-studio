@@ -76,3 +76,7 @@ npm test
 The branch keeps the original provider/concurrency/server tests and adds `tests/multi-business.test.mjs` for pack isolation, business-neutral prompts, ZIP DEFLATE/traversal handling, SQLite revisions, cross-client access denial, stale writes and scoped HTTP behavior.
 
 See `docs/IMPLEMENTATION-LOG.md` for verification details.
+
+## Companion desktop app (feature gated)
+
+Accounts can be granted access to a local Codex or Antigravity writing companion by the service administrator in Settings. Enabled users create a five-minute pairing code under **Settings → AI on your computer**, pair the [Smilecraft Companion](apps/companion-desktop/README.md), and select the local CLI for five-slide drafts or single-slide revisions. Local writing uses the user's CLI subscription and no Smilecraft credits; image generation still uses the cloud providers. Apply `cloudflare/migrations/0006_companion.sql` before deploying this Worker version. The companion installer workflow is `.github/workflows/companion-release.yml`.

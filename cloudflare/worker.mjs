@@ -1,6 +1,7 @@
 import { session, mutationAllowed, loginPage, authRoute } from './auth.mjs';
 import { apiRoute } from './studio.mjs';
 import { consumeJob, recoverStaleJobs } from './generation.mjs';
+import { companionRoute, expireCompanionJobs } from './companion.mjs';
 
 const json = (data, status = 200) => Response.json(data, { status, headers: { 'Cache-Control': 'no-store' } });
 export default {
@@ -16,6 +17,10 @@ export default {
         if (auth) return auth;
       }
       const viewer = await session(request, env);
+      if (path.startsWith('/api/companion/')) {
+        if (viewer && !['GET','HEAD'].includes(request.method) && !mutationAllowed(request,env,viewer)) return json({error:'This request did not pass the session check.'},403);
+        return companionRoute(request,env,viewer,url);
+      }
       if (path === '/login') return viewer ? Response.redirect(`${env.APP_ORIGIN}/`, 302) : loginPage(env, url.searchParams.get('error') || '');
       if (path === '/') return viewer ? env.STATIC.fetch(request) : Response.redirect(`${env.APP_ORIGIN}/login`, 302);
       if (path.startsWith('/api/')) {
@@ -29,7 +34,7 @@ export default {
       return json({ error: error.status && error.status < 500 ? error.message : 'The service could not complete that request.' }, error.status || 500);
     }
   },
-  async scheduled(_event, env) { await recoverStaleJobs(env); },
+  async scheduled(_event, env) { await recoverStaleJobs(env); await expireCompanionJobs(env); },
   async queue(batch, env) {
     for (const message of batch.messages) {
       try { await consumeJob(env, message.body?.jobId); message.ack(); }
