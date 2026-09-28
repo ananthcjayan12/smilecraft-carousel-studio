@@ -29,6 +29,57 @@ Open `http://127.0.0.1:4178`.
 
 The server binds to localhost and rejects non-loopback hosts. Do not expose it through a reverse proxy or tunnel while authentication and credits are unfinished.
 
+### Test the Cloudflare app and companion locally
+
+Use this setup to debug Google sign-in, account settings, pairing, and local Codex or Antigravity generation together. It uses the local Cloudflare Worker and D1 database. The `npm start` Node prototype above has separate storage and does not support the companion account flow. Install [Tauri's platform prerequisites](https://v2.tauri.app/start/prerequisites/) and Node.js 22 to run the companion.
+
+1. In [Google Cloud Console → Google Auth Platform → Clients](https://console.cloud.google.com/auth/clients), select the Carousel Studio project and create a **Web application** OAuth client named `Carousel Studio Local`. Add these entries:
+
+   | Setting | Value |
+   | --- | --- |
+   | Authorized JavaScript origin | `http://localhost:8787` |
+   | Authorized redirect URI | `http://localhost:8787/api/auth/google/callback` |
+
+   Save the new client ID and secret. A separate local client leaves the existing production OAuth client and its allowed URLs untouched. If the OAuth app is in Testing, add your Google account under **Google Auth Platform → Audience → Test users**. Keep `localhost` and port `8787` consistent; the redirect URI must match exactly.
+
+2. From the repository root, install dependencies and apply all migrations to the local D1 database:
+
+   ```sh
+   npm ci
+   npx wrangler d1 migrations apply DB --local --config wrangler.json
+   ```
+
+3. Create `.dev.vars` in the repository root with the **local** OAuth client's credentials. This file is ignored by Git. `APP_ORIGIN` is already set to `http://localhost:8787` in `wrangler.json`.
+
+   ```dotenv
+   GOOGLE_CLIENT_ID=your_local_client_id
+   GOOGLE_CLIENT_SECRET=your_local_client_secret
+   ADMIN_EMAIL=your_google_email
+   ```
+
+4. Start the Worker in one terminal, then open `http://localhost:8787` and sign in with Google:
+
+   ```sh
+   npx wrangler dev --config wrangler.json
+   ```
+
+5. In a second terminal, start the desktop companion:
+
+   ```sh
+   npm run companion:desktop
+   ```
+
+6. In Carousel Studio **Settings**, use the admin control to **Enable companion** for your account. Under **AI on your computer**, create a pairing code. In the companion, enter `http://localhost:8787`, a computer name, and that code, then click **Start companion**. The code expires after five minutes. Install and sign in to the Codex or Antigravity CLI before testing generation. Create a carousel and choose the local provider for writing or images.
+
+For a quick regression check after edits:
+
+```sh
+npm test
+cargo test --locked --manifest-path apps/companion-desktop/src-tauri/Cargo.toml
+```
+
+The Worker terminal shows backend errors; the browser developer tools show web errors. The companion window shows connection and provider status. Local Worker data lives under `.wrangler/` and is separate from deployed accounts and projects.
+
 ### Storage
 
 Metadata is stored in SQLite and large images remain as files. By default both live under `storage/` (ignored by Git). To move storage elsewhere:

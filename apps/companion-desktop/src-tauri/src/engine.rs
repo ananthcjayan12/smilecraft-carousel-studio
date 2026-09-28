@@ -3,6 +3,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::{
     sync::{
+        atomic::AtomicUsize,
         atomic::{AtomicBool, Ordering},
         Arc, Mutex,
     },
@@ -53,6 +54,8 @@ pub struct Engine {
     pub cancel: AtomicBool,
     pub shutdown: AtomicBool,
     pub worker_busy: AtomicBool,
+    pub active_codex: AtomicUsize,
+    pub active_antigravity: AtomicUsize,
     pub refresh: AtomicBool,
     pub operation: Mutex<()>,
     client: reqwest::blocking::Client,
@@ -108,6 +111,8 @@ impl Engine {
             cancel: AtomicBool::new(true),
             shutdown: AtomicBool::new(false),
             worker_busy: AtomicBool::new(false),
+            active_codex: AtomicUsize::new(0),
+            active_antigravity: AtomicUsize::new(0),
             refresh: AtomicBool::new(true),
             operation: Mutex::new(()),
             client: reqwest::blocking::Client::builder()
@@ -218,14 +223,45 @@ impl Engine {
                     checked = now();
                 }
                 if !self.cancel.load(Ordering::SeqCst) {
-                    let caps = self.status.lock().unwrap().capabilities.clone();
+                    let mut caps = self.status.lock().unwrap().capabilities.clone();
+                    if self.active_codex.load(Ordering::SeqCst) >= 5 {
+                        caps["codex"]["ready"] = json!(false);
+                    }
+                    if self.active_antigravity.load(Ordering::SeqCst) >= 5 {
+                        caps["antigravity"]["ready"] = json!(false);
+                    }
                     match self.request(&c, "/poll", caps) {
                         Ok(v) => {
                             if v["job"].is_null() {
                                 self.message("Connected · waiting for a generation request");
                             } else {
                                 match serde_json::from_value::<Job>(v["job"].clone()) {
-                                    Ok(job) => self.execute(&c, job),
+                                    Ok(job) => {
+                                        let counter = if job.provider == "codex" {
+                                            &self.active_codex
+                                        } else {
+                                            &self.active_antigravity
+                                        };
+                                        counter.fetch_add(1, Ordering::SeqCst);
+                                        self.status.lock().unwrap().busy = true;
+                                        let is_codex = job.provider == "codex";
+                                        let engine = self.clone();
+                                        let config = c.clone();
+                                        thread::spawn(move || {
+                                            engine.execute(&config, job);
+                                            let counter = if is_codex {
+                                                &engine.active_codex
+                                            } else {
+                                                &engine.active_antigravity
+                                            };
+                                            counter.fetch_sub(1, Ordering::SeqCst);
+                                            let busy = engine.active_codex.load(Ordering::SeqCst)
+                                                + engine.active_antigravity.load(Ordering::SeqCst)
+                                                > 0;
+                                            engine.status.lock().unwrap().busy = busy;
+                                            engine.worker_busy.store(busy, Ordering::SeqCst);
+                                        });
+                                    }
                                     Err(_) => {
                                         self.message("Rejected an invalid job; it will expire.")
                                     }
@@ -244,8 +280,13 @@ impl Engine {
                     }
                 }
             }
-            self.worker_busy.store(false, Ordering::SeqCst);
-            self.sleep(3000);
+            self.worker_busy.store(
+                self.active_codex.load(Ordering::SeqCst)
+                    + self.active_antigravity.load(Ordering::SeqCst)
+                    > 0,
+                Ordering::SeqCst,
+            );
+            self.sleep(500);
         }
     }
     fn execute(&self, c: &Config, job: Job) {
@@ -312,7 +353,6 @@ impl Engine {
                 }
             }
         }
-        self.status.lock().unwrap().busy = false;
         if lost.load(Ordering::SeqCst) {
             self.status.lock().unwrap().running = false;
             self.message(

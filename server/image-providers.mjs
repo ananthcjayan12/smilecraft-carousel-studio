@@ -195,7 +195,7 @@ async function codexImage(prompt, reference, logo, requestedModel, master, forma
     const model = limit(requestedModel, 100).trim();
     const env = { ...process.env, CI: '1' }; delete env.OPENAI_API_KEY; delete env.CODEX_API_KEY;
     const images = [referencePath, ...(masterPath ? [masterPath] : []), ...(logoPath ? [logoPath] : [])];
-    await runProcess(process.env.CODEX_BIN || 'codex', ['exec', '--ephemeral', ...(model ? ['--model', model] : []), '--sandbox', 'workspace-write', '--image', ...images, '--', instruction], { cwd: work, env }, 900000);
+    await runProcess(process.env.CODEX_BIN || 'codex', ['exec', '--ephemeral', ...(model && model !== 'imagegen' ? ['--model', model] : []), '--sandbox', 'workspace-write', '--image', ...images, '--', instruction], { cwd: work, env }, 900000);
     const generated = await stat(outputPath).catch(() => null);
     if (!generated?.isFile() || generated.size < 10_000) throw new Error('Codex completed without creating a usable final-slide.png. Check Codex login and built-in image generation availability.');
     return bufferDataUrl(await readFile(outputPath));

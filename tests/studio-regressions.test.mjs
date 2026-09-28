@@ -16,12 +16,12 @@ test('saved provider/model mismatches are repaired without changing valid select
   assert.equal(repairGeneration({ writingProvider: 'codex' }).writingModel, '');
   assert.equal(repairGeneration({ writingProvider: 'codex', writingModel: 'gpt-6-sol' }).writingModel, 'gpt-6-sol');
   assert.equal(repairGeneration({ writingProvider: 'claude', writingModel: 'gpt-5.6-sol' }).writingModel, 'claude-sonnet-4-6');
-  assert.equal(compatibleModel('antigravity', 'gemini-3.8-flash-high', 'image'), 'gemini-3-pro-image');
+  assert.equal(compatibleModel('antigravity', 'gemini-3.8-flash-high', 'image'), 'gemini-3.1-flash-image');
   assert.equal(compatibleModel('antigravity', 'gemini-3.1-flash-image', 'image'), 'gemini-3.1-flash-image');
   assert.ok(IMAGE_MODELS.antigravity.every(([id]) => id.includes('-image')));
 });
 
-test('Codex image adapter uses a Codex model and all three references with the v1 instructions', async () => {
+test('Codex image adapter uses built-in ImageGen and all three references', async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), 'carousel-codex-regression-'));
   const prior = process.env.CODEX_BIN;
   const capture = path.join(root, 'arguments.json');
@@ -42,7 +42,7 @@ test('Codex image adapter uses a Codex model and all three references with the v
       referenceImage: image('crop'), masterReferenceImage: image('board'), logoImage: image('logo') });
     assert.match(result, /^data:image\/png;base64,/);
     const recorded = JSON.parse(await readFile(capture, 'utf8'));
-    assert.equal(recorded.args[recorded.args.indexOf('--model') + 1], 'gpt-5.6-sol');
+    assert.equal(recorded.args.includes('--model'), false);
     assert.deepEqual(recorded.references.map(x => Buffer.from(x, 'base64').toString()), ['crop', 'board', 'logo']);
     assert.match(recorded.args.at(-1), /Use Codex built-in image generation/);
     assert.match(recorded.args.at(-1), /Do NOT call the OpenAI API manually/);

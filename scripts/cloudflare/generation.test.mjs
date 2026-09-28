@@ -37,6 +37,9 @@ async function project(env) {
 test('queued draft reserves once and settles credits with the saved project', async () => {
   const { sqlite, env, messages } = fixture();
   const p = await project(env);
+  const draftData = JSON.parse(sqlite.prepare('SELECT project_json FROM projects WHERE id=?').get(p.id).project_json);
+  draftData.language = 'malayalam-english';
+  sqlite.prepare('UPDATE projects SET project_json=? WHERE id=?').run(JSON.stringify(draftData), p.id);
   const input = { stage: 'draft', provider: 'openai', model: 'gpt-5.6-sol', idempotencyKey: crypto.randomUUID() };
   const queued = await runJob(env, 'a', 'c', p, input);
   assert.equal(queued.job.status, 'queued');
@@ -44,7 +47,10 @@ test('queued draft reserves once and settles credits with the saved project', as
   assert.equal(messages.length, 1);
   assert.equal(sqlite.prepare("SELECT SUM(amount) AS amount FROM credit_reservations WHERE status='reserved'").get().amount, 2);
   const originalFetch = globalThis.fetch;
-  globalThis.fetch = async () => Response.json({ choices: [{ message: { content: JSON.stringify({ slides: Array.from({ length: 5 }, (_, i) => ({ heading: `Slide ${i + 1}`, body: 'Useful information', visualPrompt: 'Clean illustration' })), instagram: 'Caption', facebook: 'Caption', youtubeTitle: 'Video', youtubeDescription: 'Description' }) } }] });
+  globalThis.fetch = async (_url, options) => {
+    assert.match(JSON.parse(options.body).messages[0].content, /Malayalam words must use Malayalam script; English words stay in Latin script/);
+    return Response.json({ choices: [{ message: { content: JSON.stringify({ slides: Array.from({ length: 5 }, (_, i) => ({ heading: `Slide ${i + 1}`, body: 'Useful information', visualPrompt: 'Clean illustration' })), instagram: 'Caption', facebook: 'Caption', youtubeTitle: 'Video', youtubeDescription: 'Description' }) } }] });
+  };
   try { await consumeJob(env, queued.job.id); } finally { globalThis.fetch = originalFetch; }
   assert.equal(sqlite.prepare('SELECT status,error FROM generation_jobs WHERE id=?').get(queued.job.id).status, 'succeeded');
   assert.equal(sqlite.prepare('SELECT SUM(amount) AS amount FROM credit_ledger WHERE account_id=?').get('a').amount, 1);
@@ -90,5 +96,37 @@ test('image job stores private artwork and charges after attaching it to the sli
   assert.equal(sqlite.prepare('SELECT SUM(amount) AS amount FROM credit_ledger WHERE account_id=?').get('a').amount, 13);
   assert.equal(objects.size, 1);
   assert.ok((await getProject(env, 'a', 'c', p.id)).slides[0].artworkAssetId);
+  sqlite.close();
+});
+
+test('parallel hosted image jobs preserve both slides and settle both reservations', async () => {
+  const { sqlite, env } = fixture();
+  sqlite.prepare("INSERT INTO credit_ledger(id,account_id,amount,kind,source_id) VALUES('parallel-grant','a',30,'manual_plan','parallel-month')").run();
+  const p = await project(env);
+  const value = JSON.parse(sqlite.prepare('SELECT project_json FROM projects WHERE id=?').get(p.id).project_json);
+  value.slides[0].approved = true;
+  value.slides[1].approved = true;
+  sqlite.prepare('UPDATE projects SET project_json=? WHERE id=?').run(JSON.stringify(value), p.id);
+  const objects = new Map();
+  env.STATIC = { fetch: async () => new Response(new Uint8Array([0xff, 0xd8, 0xff]), { headers: { 'Content-Type': 'image/jpeg' } }) };
+  env.ASSETS = { put: async (key, bytes) => objects.set(key, bytes), delete: async key => objects.delete(key) };
+  const current = await getProject(env, 'a', 'c', p.id);
+  const jobs = await Promise.all([0, 1].map(slideIndex => runJob(env, 'a', 'c', current, { stage: 'image', slideIndex, provider: 'openai', model: 'gpt-image-2', idempotencyKey: crypto.randomUUID() })));
+  let started = 0, release;
+  const gate = new Promise(resolve => { release = resolve; });
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async () => {
+    if (++started === 2) release();
+    await gate;
+    return Response.json({ data: [{ b64_json: 'iVBORw0KGgo=' }] });
+  };
+  try { await Promise.all(jobs.map(({ job }) => consumeJob(env, job.id))); }
+  finally { globalThis.fetch = originalFetch; }
+  const saved = await getProject(env, 'a', 'c', p.id);
+  assert.ok(saved.slides[0].artworkAssetId);
+  assert.ok(saved.slides[1].artworkAssetId);
+  assert.notEqual(saved.slides[0].artworkAssetId, saved.slides[1].artworkAssetId);
+  assert.equal(sqlite.prepare("SELECT COUNT(*) n FROM generation_jobs WHERE status='succeeded'").get().n, 2);
+  assert.equal(sqlite.prepare("SELECT COUNT(*) n FROM credit_reservations WHERE status='settled'").get().n, 2);
   sqlite.close();
 });

@@ -15,6 +15,23 @@ function fixture() {
 const route=(env,viewer,path,method='GET',body,token)=>{const url=new URL(`https://test.example/api/companion${path}`);return companionRoute(new Request(url,{method,headers:token?{Authorization:`Bearer ${token}`}:{},body:body?JSON.stringify(body):undefined}),env,viewer,url);};
 const caps={codex:{installed:true,ready:true,version:'1',detail:'Ready',models:[{id:'gpt-6-sol',label:'GPT-6 Sol'}],imageModels:[{id:'imagegen',label:'Codex ImageGen'}]},antigravity:{installed:false,ready:false,version:'',detail:'Not found',models:[],imageModels:[]}};
 
+test('companion leases five jobs from the same provider concurrently',async()=>{
+  const {sqlite,env,viewer}=fixture();
+  const pair=await (await route(env,viewer,'/devices/pairing','POST',{})).json();
+  const device=await (await route(env,null,'/pair','POST',{code:pair.code,name:'Laptop'})).json();
+  await route(env,null,'/poll','POST',caps,device.token);
+  const url=new URL('https://test.example/api/clients/c/projects');
+  const project=(await (await apiRoute(new Request(url,{method:'POST',body:JSON.stringify({topic:'Topic'})}),env,viewer,url)).json()).project;
+  for(let i=0;i<6;i++) await enqueueCompanion(env,viewer,project,{stage:'draft',provider:'codex',idempotencyKey:crypto.randomUUID()});
+  const leases=[];
+  for(let i=0;i<5;i++) leases.push((await (await route(env,null,'/poll','POST',caps,device.token)).json()).job);
+  assert.equal(new Set(leases.map(job=>job.id)).size,5);
+  assert.equal((await (await route(env,null,'/poll','POST',caps,device.token)).json()).job,null);
+  await route(env,null,`/jobs/${leases[0].id}/complete`,'POST',{lease:leases[0].lease,error:'generation_failed'},device.token);
+  assert.ok((await (await route(env,null,'/poll','POST',caps,device.token)).json()).job);
+  sqlite.close();
+});
+
 test('flagged account pairs, polls, completes a draft and can revoke device',async()=>{
   const {sqlite,env,viewer}=fixture();
   const pair=await (await route(env,viewer,'/devices/pairing','POST',{})).json();
@@ -24,10 +41,12 @@ test('flagged account pairs, polls, completes a draft and can revoke device',asy
   const url=new URL('https://test.example/api/clients/c/projects');
   const created=await apiRoute(new Request(url,{method:'POST',body:JSON.stringify({topic:'Brush gently'})}),env,viewer,url);
   const project=(await created.json()).project;
+  project.language='malayalam-english';
   const queued=await enqueueCompanion(env,viewer,project,{stage:'draft',provider:'codex',idempotencyKey:crypto.randomUUID()});
   assert.equal(queued.job.quotedCredits,0);
   const job=(await (await route(env,null,'/poll','POST',caps,device.token)).json()).job;
   assert.equal(job.task,'draft');assert.match(job.input.prompt,/Brush gently/);
+  assert.match(job.input.prompt,/Malayalam words must use Malayalam script; English words stay in Latin script/);
   assert.equal((await (await route(env,null,`/jobs/${job.id}/heartbeat`,'POST',{lease:job.lease},device.token)).json()).active,true);
   const result={slides:Array.from({length:5},(_,i)=>({heading:`Heading ${i}`,body:'Useful advice',visualPrompt:'Clean illustration'})),instagram:'Caption',facebook:'Caption',youtubeTitle:'Video',youtubeDescription:'Description'};
   assert.equal((await route(env,null,`/jobs/${job.id}/complete`,'POST',{lease:job.lease,result},device.token)).status,200);
@@ -118,5 +137,32 @@ test('local image model receives its reference and saves generated artwork',asyn
   assert.equal((await route(env,null,`/jobs/${job.id}/complete`,'POST',{lease:job.lease,result:{image}},device.token)).status,200);
   const saved=await getProject(env,'a','c',project.id);
   assert.ok(saved.slides[0].artworkAssetId);assert.equal(saved.slides[0].artworkProvider,'codex');assert.equal(objects.size,1);
+  sqlite.close();
+});
+
+test('parallel local images keep both slides when completed in reverse order',async()=>{
+  const {sqlite,env,viewer}=fixture();
+  const objects=new Map();
+  env.STATIC={fetch:async()=>new Response(new Uint8Array([137,80,78,71,13,10,26,10]),{headers:{'content-type':'image/png'}})};
+  env.ASSETS={put:async(key,bytes)=>objects.set(key,bytes),get:async(key)=>objects.has(key)?{arrayBuffer:async()=>objects.get(key)}:null,delete:async(key)=>objects.delete(key)};
+  const pair=await (await route(env,viewer,'/devices/pairing','POST',{})).json();
+  const device=await (await route(env,null,'/pair','POST',{code:pair.code,name:'Laptop'})).json();
+  await route(env,null,'/poll','POST',caps,device.token);
+  const url=new URL('https://test.example/api/clients/c/projects');
+  const project=(await (await apiRoute(new Request(url,{method:'POST',body:JSON.stringify({topic:'Topic'})}),env,viewer,url)).json()).project;
+  const data=JSON.parse(sqlite.prepare('SELECT project_json FROM projects WHERE id=?').get(project.id).project_json);
+  data.templateId='builtin:dental:neutral:1.0.0';
+  data.slides[0].approved=true;data.slides[1].approved=true;
+  sqlite.prepare('UPDATE projects SET project_json=? WHERE id=?').run(JSON.stringify(data),project.id);
+  const current=await getProject(env,'a','c',project.id);
+  for(let i=0;i<2;i++) await enqueueCompanion(env,viewer,current,{stage:'image',slideIndex:i,provider:'codex',model:'imagegen',idempotencyKey:crypto.randomUUID()});
+  const jobs=[];
+  for(let i=0;i<2;i++) jobs.push((await (await route(env,null,'/poll','POST',caps,device.token)).json()).job);
+  const image='data:image/png;base64,'+Buffer.from([137,80,78,71,13,10,26,10,1,2,3]).toString('base64');
+  for(const job of jobs.reverse()) assert.equal((await route(env,null,`/jobs/${job.id}/complete`,'POST',{lease:job.lease,result:{image}},device.token)).status,200);
+  const saved=await getProject(env,'a','c',project.id);
+  assert.ok(saved.slides[0].artworkAssetId);
+  assert.ok(saved.slides[1].artworkAssetId);
+  assert.notEqual(saved.slides[0].artworkAssetId,saved.slides[1].artworkAssetId);
   sqlite.close();
 });

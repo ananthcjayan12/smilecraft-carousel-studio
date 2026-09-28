@@ -155,15 +155,13 @@ pub fn inspect(paths: &Paths, cancel: &AtomicBool) -> Value {
             c.image_models = if provider == "codex" {
                 vec![Model {
                     id: "imagegen".into(),
-                    label: "Codex ImageGen".into(),
+                    label: "Codex built-in ImageGen (model managed by Codex)".into(),
                 }]
             } else {
-                [
-                    ("gemini-3-pro-image", "Nano Banana Pro"),
-                    ("gemini-3.1-flash-image", "Nano Banana 2"),
-                    ("gemini-3.1-flash-lite-image", "Nano Banana 2 Lite"),
-                    ("gemini-2.5-flash-image", "Nano Banana"),
-                ]
+                [(
+                    "gemini-3.1-flash-image",
+                    "Nano Banana 2 (managed by Antigravity)",
+                )]
                 .into_iter()
                 .map(|(id, label)| Model {
                     id: id.into(),
@@ -367,18 +365,13 @@ pub fn generate_image(
     references: &Value,
     cancel: &AtomicBool,
 ) -> Result<Value, String> {
-    if job.task != "image" || job.input.prompt.trim().is_empty() || job.input.prompt.len() > 8000 {
+    if job.task != "image" || job.input.prompt.trim().is_empty() || job.input.prompt.len() > 24000 {
         return Err("Invalid image job".into());
     }
     let allowed = if job.provider == "codex" {
         vec!["imagegen"]
     } else if job.provider == "antigravity" {
-        vec![
-            "gemini-3-pro-image",
-            "gemini-3.1-flash-image",
-            "gemini-3.1-flash-lite-image",
-            "gemini-2.5-flash-image",
-        ]
+        vec!["gemini-3.1-flash-image"]
     } else {
         return Err("Unsupported provider".into());
     };
@@ -429,16 +422,7 @@ pub fn generate_image(
         args.extend(["--".into(),format!("$imagegen\nUse built-in image generation to create exactly one finished image. Inspect the attached reference and logo images. Save the result as final-slide.png in the current working directory. Do not call an API manually or only describe the image.\n{}",job.input.prompt)]);
         (resolve("codex", &paths.codex)?, args)
     } else {
-        let names = if job.input.model == "gemini-3-pro-image" {
-            "Nano Banana Pro"
-        } else if job.input.model == "gemini-3.1-flash-image" {
-            "Nano Banana 2"
-        } else if job.input.model == "gemini-3.1-flash-lite-image" {
-            "Nano Banana 2 Lite"
-        } else {
-            "Nano Banana"
-        };
-        let instruction=format!("Call the native generate_image tool to make one final image. Request {names} ({}). Set ImageName exactly to final-slide.png and ImagePaths to {}. Keep the slide inside a 4:5 safe area. Save the image in the current working directory. Do not only describe it.\n{}",job.input.model,serde_json::to_string(&files).unwrap(),job.input.prompt);
+        let instruction=format!("Call the native generate_image tool to make one final image. Set ImageName exactly to final-slide.png and ImagePaths to {}. Keep the slide inside a 4:5 safe area. Save the image in the current working directory. Do not only describe it.\n{}",serde_json::to_string(&files).unwrap(),job.input.prompt);
         (
             resolve("agy", &paths.antigravity)?,
             vec![

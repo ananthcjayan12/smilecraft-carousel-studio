@@ -17,7 +17,7 @@
   "r2_buckets": [{ "binding": "ASSETS", "bucket_name": "carousel-studio-v3-assets" }],
   "queues": {
     "producers": [{ "binding": "GENERATION", "queue": "carousel-studio-v3-jobs" }],
-    "consumers": [{ "queue": "carousel-studio-v3-jobs", "max_batch_size": 1, "max_retries": 3, "dead_letter_queue": "carousel-studio-v3-dead", "max_concurrency": 2 }]
+    "consumers": [{ "queue": "carousel-studio-v3-jobs", "max_batch_size": 1, "max_retries": 3, "dead_letter_queue": "carousel-studio-v3-dead", "max_concurrency": 10 }]
   },
   "vars": { "APP_ORIGIN": "http://localhost:8787" },
   "observability": { "enabled": true }

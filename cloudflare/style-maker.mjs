@@ -1,4 +1,5 @@
 import { IMAGE_MODELS } from '../web/provider-models.js';
+import { buildV1StylePrompt } from './prompts.mjs';
 import { assetBytes, decodeImage } from './studio.mjs';
 
 const fail = (message, status = 400) => Object.assign(new Error(message), { status });
@@ -37,7 +38,7 @@ export async function renderStyleBoard(env, accountId, client, input) {
   const direction = limit(input.direction, 500), language = limit(input.language, 100), languageNotes = limit(input.languageNotes, 400);
   const primary = /^#[0-9a-fA-F]{6}$/.test(input.primary) ? input.primary : '#073a42';
   const accent = /^#[0-9a-fA-F]{6}$/.test(input.accent) ? input.accent : '#14ada9';
-  const prompt = `Act as a senior brand designer. Create one original landscape 4:3 design board containing exactly five separate portrait 4:5 social carousel templates in a horizontal row. The first attached board is design inspiration only. Reinterpret its hierarchy, spacing, typography and visual rhythm for this business. Do not copy its dental content or identity.\nBUSINESS: ${JSON.stringify(name)}\nINDUSTRY: ${JSON.stringify(businessType)}\nCOLORS: ${primary}, ${accent}\nLANGUAGE: ${JSON.stringify(language)}. ${JSON.stringify(languageNotes)}\nCREATIVE DIRECTION: ${JSON.stringify(direction)}\nUse the separately supplied exact logo consistently. If a mood image is supplied, use it only for art direction. Five panels: hook, explanation, benefits, details, CTA. Use only generic placeholder labels. No invented facts or contact details. Keep all five panels fully visible, straight-on and evenly separated so each can be cropped into a reusable slide reference. No mockups, watermarks or extra panels.`;
+  const prompt = buildV1StylePrompt({ design: input.design, brand: { name, primary, accent }, businessType, language, languageNotes, direction });
   const creditId = crypto.randomUUID();
   const debit = await env.DB.prepare(`INSERT INTO credit_ledger(id,account_id,amount,kind,source_id)
     SELECT ?,?,-10,'style_generation',? WHERE

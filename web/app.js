@@ -252,14 +252,14 @@ async function generateStyles(designs) {
   S.busy = 'maker'; m.progress = 0; m.total = designs.length; render();
   const errors = [];
   try {
-    for (const design of designs) {
+    await runConcurrent(designs, 5, async (design) => {
       try {
         const result = await api(`/api/clients/${S.client.id}/style-maker/render`, { designId: design.id, design: { name: design.name, kind: design.kind }, name: m.name, brand: { name: m.name, primary: m.primary, accent: m.accent }, businessType: m.businessType, primary: m.primary, accent: m.accent, language: m.language, languageNotes: m.languageNotes, direction: m.direction, provider: m.provider, model: m.model, logoImage: m.logoImage, moodImage: m.moodImage });
         const images = await cropStyleBoard(result.image, design.crop);
         await api(`/api/clients/${S.client.id}/templates`, { name: `${m.name} — ${design.name}`, images });
       } catch (error) { errors.push(`${design.name}: ${error.message}`); }
       m.progress++; render();
-    }
+    });
     S.templates = (await api(`/api/clients/${S.client.id}/templates`)).templates;
     S.me = await api('/api/me');
     toast(errors.length ? `${m.total - errors.length}/${m.total} styles created. ${errors[0]}` : `${m.total} style${m.total === 1 ? '' : 's'} added to this client.`);
@@ -505,12 +505,12 @@ async function job(stage, extra = {}) {
     render();
   }
 }
-async function waitForJob(id) {
+async function waitForJob(id, refreshProject = true) {
   const base = `/api/clients/${S.client.id}/projects/${S.p.id}`;
   for (let attempt = 0; attempt < 360; attempt++) {
     const { job: current } = await api(`${base}/jobs/${id}`);
     if (current.status === 'succeeded') {
-      S.p = (await api(base)).project;
+      if (refreshProject) S.p = (await api(base)).project;
       return;
     }
     if (['failed', 'cancelled', 'expired'].includes(current.status)) throw Error(current.error || 'Generation failed. Credits were returned.');
@@ -727,7 +727,7 @@ async function act(n) {
         const g = S.p.generation;
         const batch = await runConcurrent(
           ids,
-          1,
+          Math.min(5, ids.length),
           async (i) => {
             const created = await api(`/api/clients/${S.client.id}/projects/${S.p.id}/jobs`, {
               stage: "image",
@@ -736,7 +736,7 @@ async function act(n) {
               slideIndex: i,
               idempotencyKey: crypto.randomUUID(),
             });
-            await waitForJob(created.job.id);
+            await waitForJob(created.job.id, false);
           },
           {
             onStart: ({ active }) => {
