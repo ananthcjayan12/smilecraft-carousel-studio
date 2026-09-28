@@ -422,6 +422,16 @@ header,
   grid-template-columns: repeat(3, 1fr);
   gap: 13px;
 }
+.style-maker { margin-bottom: 22px; }
+.maker-directions { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 10px; margin: 12px 0 22px; }
+.maker-direction { background: #fff; border: 1px solid var(--l); border-radius: 12px; padding: 8px; text-align: left; color: #15323b; cursor: pointer; }
+.maker-direction.sel { border-color: #0d9f99; background: #e6f9f5; box-shadow: 0 0 0 2px #b9e9e2; }
+.maker-direction img { width: 100%; height: 88px; object-fit: cover; border-radius: 7px; display: block; margin-bottom: 7px; }
+.maker-direction b, .maker-direction small { display: block; }
+.maker-direction small { color: var(--m); font-size: 11px; margin-top: 3px; }
+.maker-upload { display: block; border: 1px dashed var(--l); border-radius: 9px; padding: 11px; cursor: pointer; font-weight: 500; }
+.maker-upload input { width: 100%; max-width: 100%; font-size: 11px; }
+@media (max-width: 800px) { .maker-directions { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 .clients button,
 .styles > div,
 .styles button {

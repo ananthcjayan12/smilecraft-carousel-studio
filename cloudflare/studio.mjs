@@ -2,6 +2,7 @@ import { publicBusinessPacks, getBusinessPack, resolveBusinessContext, starterSl
 import { repairGeneration } from '../web/studio-controls.js';
 import { runJob } from './generation.mjs';
 import { templateImportRoute } from './template-import.mjs';
+import { renderStyleBoard } from './style-maker.mjs';
 
 const now = () => new Date().toISOString();
 const parse = (value, fallback = {}) => { try { return JSON.parse(value); } catch { return fallback; } };
@@ -135,11 +136,23 @@ export async function apiRoute(request, env, viewer, url) {
     return json({ templates: [...custom, ...builtin.filter(item => item.businessPackId === client.businessPackId)] });
   }
   if (parts[3] === 'templates' && parts.length === 4 && method === 'POST') {
-    const input = await body(), image = decodeImage(input.image), asset = await saveAsset(env, accountId, clientId, { kind: 'template-reference', name: input.name || 'Reference', ...image });
+    const input = await body();
+    if (Array.isArray(input.images)) {
+      if (input.images.length !== 5) return bad('A generated style needs five slide images.');
+      const images = input.images.map(decodeImage);
+      const id = crypto.randomUUID(), name = String(input.name || 'Generated style').trim().slice(0, 100);
+      const refs = [];
+      for (const [i, image] of images.entries()) refs.push(await saveAsset(env, accountId, clientId, { kind: 'template-reference', name: `${name}-${i + 1}`, ...image }));
+      const data = { slides: refs.map((asset, i) => ({ position: i + 1, assetId: asset.id })) };
+      await env.DB.prepare('INSERT INTO templates(id,account_id,client_id,name,business_pack_id,mode,data_json,created_at) VALUES(?,?,?,?,?,?,?,?)').bind(id, accountId, clientId, name, client.businessPackId, 'slides', JSON.stringify(data), now()).run();
+      return json({ template: { id, clientId, name, businessPackId: client.businessPackId, mode: 'slides', data } }, 201);
+    }
+    const image = decodeImage(input.image), asset = await saveAsset(env, accountId, clientId, { kind: 'template-reference', name: input.name || 'Reference', ...image });
     const id = crypto.randomUUID(), name = String(input.name || 'Custom reference').trim().slice(0, 100);
     await env.DB.prepare('INSERT INTO templates(id,account_id,client_id,name,business_pack_id,mode,data_json,created_at) VALUES(?,?,?,?,?,?,?,?)').bind(id, accountId, clientId, name, client.businessPackId, 'slides', JSON.stringify({ slides: Array.from({ length: 5 }, (_, i) => ({ position: i + 1, assetId: asset.id })) }), now()).run();
     return json({ template: { id, clientId, name, businessPackId: client.businessPackId, mode: 'slides', data: { slides: Array.from({ length: 5 }, (_, i) => ({ position: i + 1, assetId: asset.id })) } } }, 201);
   }
+  if (parts[3] === 'style-maker' && parts[4] === 'render' && parts.length === 5 && method === 'POST') return json(await renderStyleBoard(env, accountId, client, await body()));
   if (parts[3] === 'import-project' && parts.length === 4 && method === 'POST') {
     const input = await body(), source = input.project;
     if (!source || !Array.isArray(source.slides) || source.slides.length !== 5) return bad('Invalid portable project.');

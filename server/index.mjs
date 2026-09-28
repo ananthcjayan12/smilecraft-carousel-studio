@@ -84,11 +84,29 @@ if(parts[0]==='api'&&parts[1]==='clients'&&parts[3]==='projects'&&parts[5]==='jo
 if(parts[0]==='api'&&parts[1]==='clients'&&parts[3]==='projects'&&parts[5]==='jobs'&&req.method==='GET')return send(res,200,{jobs:listJobs(parts[2],parts[4])});
 if(parts[0]==='api'&&parts[1]==='clients'&&parts[3]==='templates'&&parts.length===4&&req.method==='POST'){
   const client=getClient(parts[2]);if(!client)return send(res,404,{error:'Client not found.'});
-  const d=await body(req,25_000_000),parsed=parseDataUrl(d.image),{default:sharp}=await import('sharp');await sharp(parsed.bytes).metadata();
+  const d=await body(req,35_000_000),{default:sharp}=await import('sharp');
+  if(Array.isArray(d.images)){
+    if(d.images.length!==5)return send(res,400,{error:'A generated style needs five slide images.'});
+    const parsed=d.images.map(parseDataUrl);
+    const refs=[];for(const [i,image] of parsed.entries()){await sharp(image.bytes).metadata();refs.push(await storeAsset(client.id,{kind:'template-reference',name:`${d.name||'Generated style'}-${i+1}`,mime:image.mime,bytes:image.bytes}));}
+    const templateId='custom:'+crypto.randomUUID();
+    installTemplateRecords(client.id,[{id:templateId,packId:templateId,packVersion:'1.0.0',name:String(d.name||'Generated style').slice(0,100),businessPackId:client.businessPackId,mode:'slides',data:{slides:refs.map((asset,i)=>({position:i+1,assetId:asset.id}))},checksum:refs.map(x=>x.checksum).join(':')}]);
+    return send(res,201,{template:getTemplate(client.id,templateId)});
+  }
+  const parsed=parseDataUrl(d.image);await sharp(parsed.bytes).metadata();
   const asset=await storeAsset(client.id,{kind:'template-reference',name:d.name||'Custom reference',mime:parsed.mime,bytes:parsed.bytes});
   const templateId='custom:'+crypto.randomUUID();
   installTemplateRecords(client.id,[{id:templateId,packId:templateId,packVersion:'1.0.0',name:String(d.name||'Custom reference').slice(0,100),businessPackId:client.businessPackId,mode:'slides',data:{slides:Array.from({length:5},(_,i)=>({position:i+1,assetId:asset.id}))},checksum:asset.checksum}]);
   return send(res,201,{template:getTemplate(client.id,templateId)});
+}
+if(parts[0]==='api'&&parts[1]==='clients'&&parts[3]==='style-maker'&&parts[4]==='render'&&req.method==='POST'){
+  const client=getClient(parts[2]);if(!client)return send(res,404,{error:'Client not found.'});
+  const d=await body(req,45_000_000),designId=String(d.designId||'');if(!legacyTemplateIds.has(designId))return send(res,400,{error:'Choose one of the ten design inspirations.'});
+  const reference=await readFile(path.join(site,'assets','design-systems',`${designId}.png`));
+  const logoAsset=client.brand?.logoAssetId?getAsset(client.id,client.brand.logoAssetId):null;
+  const logoImage=d.logoImage||(logoAsset?dataUrl(await readFile(logoAsset.path),logoAsset.mime):'');
+  const image=await withProviderSlot(String(d.provider||'openai'),()=>generateTemplateBoard({...d,logoImage,referenceImage:dataUrl(reference,'image/png'),workDir:storageRoot}));
+  return send(res,200,{image});
 }
 if(parts[0]==='api'&&parts[1]==='clients'&&parts[3]==='templates'&&req.method==='GET'){const c=getClient(parts[2]);if(!c)return send(res,404,{error:'Client not found.'});return send(res,200,{templates:listTemplates(c.id,c.businessPackId)})}
 if(parts[0]==='api'&&parts[1]==='clients'&&parts[3]==='assets'&&parts.length===5&&req.method==='GET'){const a=getAsset(parts[2],parts[4]);if(!a)return send(res,404,{error:'Asset not found.'});res.writeHead(200,{'Content-Type':a.mime,'Cache-Control':'private, max-age=3600','X-Content-Type-Options':'nosniff'});return fs.createReadStream(a.path).pipe(res)}

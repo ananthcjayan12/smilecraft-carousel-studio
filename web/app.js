@@ -3,6 +3,7 @@ import { IMAGE_MODELS, WRITING_MODELS } from "./provider-models.js";
 import { runConcurrent } from "./batch-runner.js";
 import { makeZip, downloadBlob } from "./zip.js";
 import { analyzeLogoColors } from "./logo-colors.js";
+import { DESIGN_SYSTEMS } from "./design-systems.js";
 const root = document.querySelector("#app"),
   T = document.querySelector("#toast"),
   E = (v) =>
@@ -43,6 +44,7 @@ let S = {
   importId: "",
   regenerationNotes: {},
   logoColors: null,
+  maker: { name: '', businessType: '', primary: '#073a42', accent: '#14ada9', language: 'English', languageNotes: '', direction: '', provider: 'openai', model: IMAGE_MODELS.openai[0][0], designId: DESIGN_SYSTEMS[0].id, logoImage: '', logoName: '', moodImage: '', moodName: '', progress: 0, total: 0 },
   create: { clientId: "", goal: "Educate", topic: "", facts: "" },
 };
 const api = async (u, d, m = d === undefined ? "GET" : "POST", raw = false) => {
@@ -126,7 +128,9 @@ async function client(id) {
     tab: "overview",
     p: null,
     logoColors: null,
+    maker: { ...S.maker, name: a.client.brand?.name || a.client.name, businessType: pk(a.client.businessPackId).name || '', primary: a.client.brand?.primary || '#073a42', accent: a.client.brand?.accent || '#14ada9', provider: S.status.imageProviders?.[S.maker.provider]?.available ? S.maker.provider : Object.keys(S.status.imageProviders || {}).find(id => S.status.imageProviders[id].available) || S.maker.provider, logoImage: '', logoName: '', moodImage: '', moodName: '', progress: 0, total: 0 },
   });
+  if (!IMAGE_MODELS[S.maker.provider]?.some(([id]) => id === S.maker.model)) S.maker.model = IMAGE_MODELS[S.maker.provider]?.[0]?.[0] || '';
   render();
 }
 async function project(id) {
@@ -154,7 +158,7 @@ function nav() {
     )
     .join(
       "",
-    )}<p class="side-note"><b>${E(S.me?.credits ?? 0)} credits available</b>Draft 2 · rewrite 1 · image 10</p></aside>`;
+    )}<p class="side-note"><b>${E(S.me?.credits ?? 0)} credits available</b>Draft 2 · rewrite 1 · image 10 · style 10</p></aside>`;
 }
 function shell(x) {
   root.innerHTML = `<div class="shell">${nav()}<main><header><span>Carousel Studio${S.client ? " / " + E(S.client.name) : ""}</span><button class="btn primary" data-a="nav" data-v="create">＋ Create carousel</button></header>${x}</main></div>`;
@@ -216,14 +220,52 @@ const img = (t) => {
 };
 function styles(ts, editable = false) {
   const upload = editable ? `<div class="row" style="gap:12px;flex-wrap:wrap"><label class="btn upload">Upload one reference image<input type="file" data-file="style-image" accept="image/png,image/jpeg,image/webp"></label><label class="btn upload">Import five-slide design ZIP<input type="file" data-file="design-package" accept=".zip,application/zip"></label></div>${S.import ? `<div class="card form"><h3>Package preview</h3><p>${E(S.import.kind)} · ${S.import.images?.length || 0} images</p>${S.import.unresolved ? `<p>Choose five images to map before installing.</p><button class="btn" data-a="confirm-design">Use first five images</button>` : `<p>${(S.import.manifest?.templates || S.import.templates || []).map(t => E(t.name)).join(', ')}</p><button class="btn primary" data-a="install-design">Install styles</button>`}</div>` : ''}` : '';
-  return `<section class="card form"><div class="style-head"><div><h2>Visual styles</h2><p class="muted">Choose a style for consistent carousel artwork.</p></div></div>${upload}<div class="styles">${ts.map((t) => `<div>${img(t) ? `<img src="${img(t)}">` : "✦"}<b>${E(t.name)}</b><small>${t.clientId === null ? "Shared" : "Private"} style</small></div>`).join("") || '<div class="empty">No styles installed yet.</div>'}</div></section>`;
+  return `${editable ? styleMaker() : ''}<section class="card form"><div class="style-head"><div><h2>Visual styles</h2><p class="muted">Choose a style for consistent carousel artwork.</p></div></div>${upload}<div class="styles">${ts.map((t) => `<div>${img(t) ? `<img src="${img(t)}">` : "✦"}<b>${E(t.name)}</b><small>${t.clientId === null ? "Shared" : "Private"} style</small></div>`).join("") || '<div class="empty">No styles installed yet.</div>'}</div></section>`;
+}
+function styleMaker() {
+  const m = S.maker, available = Object.entries(S.status.imageProviders || {}).filter(([, value]) => value.available);
+  const hasLogo = Boolean(m.logoImage || S.client.brand?.logoAssetId);
+  return `<section class="card form style-maker"><h2>Create styles from your brand</h2><p class="muted">Add your exact logo and creative direction. Each design direction creates five reusable slide references for this client.</p><div class="two"><label>Business name<input class="control" data-maker="name" value="${E(m.name)}"></label><label>Industry / business type<input class="control" data-maker="businessType" value="${E(m.businessType)}"></label></div><div class="two"><label>Primary colour<input type="color" data-maker="primary" value="${E(m.primary)}"></label><label>Accent colour<input type="color" data-maker="accent" value="${E(m.accent)}"></label></div><div class="two"><label>Exact logo <small>${S.client.brand?.logoAssetId ? 'Brand kit logo ready' : 'Required'}</small><span class="maker-upload"><input type="file" data-file="maker-logo" accept="image/png,image/jpeg,image/webp">${E(m.logoName || (S.client.brand?.logoAssetId ? 'Use brand kit logo or replace it' : 'Choose a logo'))}</span></label><label>Visual mood reference <small>Optional</small><span class="maker-upload"><input type="file" data-file="maker-mood" accept="image/png,image/jpeg,image/webp">${E(m.moodName || 'Choose an image')}</span></label></div><div class="two"><label>Language style<select class="control" data-maker="language">${['English','Malayalam + English','Hindi + English','Arabic + English','Custom mix'].map(x => `<option ${m.language === x ? 'selected' : ''}>${E(x)}</option>`).join('')}</select></label><label>Language notes<input class="control" data-maker="languageNotes" value="${E(m.languageNotes)}" placeholder="e.g. Malayalam headlines, English details"></label></div><label>Creative direction<textarea class="control" data-maker="direction" placeholder="Audience, mood, photography and things to avoid">${E(m.direction)}</textarea></label><h3>Choose a design direction</h3><div class="maker-directions">${DESIGN_SYSTEMS.map(d => `<button type="button" class="maker-direction ${m.designId === d.id ? 'sel' : ''}" data-a="maker-design" data-v="${d.id}"><img src="${E(d.img)}" alt=""><b>${E(d.name)}</b><small>${E(d.kind)}</small></button>`).join('')}</div><div class="two"><label>Image provider<select class="control" data-maker="provider">${available.map(([id, value]) => `<option value="${E(id)}" ${m.provider === id ? 'selected' : ''}>${E(value.label || id)}</option>`).join('')}</select></label><label>Image model<select class="control" data-maker="model">${(IMAGE_MODELS[m.provider] || []).map(([id, label]) => `<option value="${E(id)}" ${m.model === id ? 'selected' : ''}>${E(label)}</option>`).join('')}</select></label></div><p class="muted">Each generated direction costs 10 credits in the cloud. Review generated text and logo before publishing.</p>${S.busy === 'maker' ? `<p role="status">Creating style ${m.progress + 1} of ${m.total}…</p>` : ''}<div class="row" style="gap:10px;flex-wrap:wrap"><button class="btn primary" data-a="maker-generate" ${S.busy || !hasLogo || !available.length ? 'disabled' : ''}>Create selected style</button><button class="btn" data-a="maker-all" ${S.busy || !hasLogo || !available.length ? 'disabled' : ''}>Create all 10 styles</button></div></section>`;
+}
+async function cropStyleBoard(dataUrl, crop) {
+  const board = new Image();
+  board.src = dataUrl;
+  await board.decode();
+  const panel = (1 - crop.left - crop.right - crop.gap * 4) / 5;
+  return Array.from({ length: 5 }, (_, i) => {
+    const canvas = document.createElement('canvas');
+    canvas.width = 768; canvas.height = 960;
+    const x = (crop.left + i * (panel + crop.gap)) * board.naturalWidth;
+    canvas.getContext('2d').drawImage(board, x, crop.top * board.naturalHeight, panel * board.naturalWidth, (crop.bottom - crop.top) * board.naturalHeight, 0, 0, canvas.width, canvas.height);
+    return canvas.toDataURL('image/jpeg', .88);
+  });
+}
+async function generateStyles(designs) {
+  const m = S.maker;
+  if (!m.name.trim() || !m.businessType.trim()) throw Error('Add the business name and industry first.');
+  if (!m.logoImage && !S.client.brand?.logoAssetId) throw Error('Add a logo first.');
+  S.busy = 'maker'; m.progress = 0; m.total = designs.length; render();
+  const errors = [];
+  try {
+    for (const design of designs) {
+      try {
+        const result = await api(`/api/clients/${S.client.id}/style-maker/render`, { designId: design.id, design: { name: design.name, kind: design.kind }, name: m.name, brand: { name: m.name, primary: m.primary, accent: m.accent }, businessType: m.businessType, primary: m.primary, accent: m.accent, language: m.language, languageNotes: m.languageNotes, direction: m.direction, provider: m.provider, model: m.model, logoImage: m.logoImage, moodImage: m.moodImage });
+        const images = await cropStyleBoard(result.image, design.crop);
+        await api(`/api/clients/${S.client.id}/templates`, { name: `${m.name} — ${design.name}`, images });
+      } catch (error) { errors.push(`${design.name}: ${error.message}`); }
+      m.progress++; render();
+    }
+    S.templates = (await api(`/api/clients/${S.client.id}/templates`)).templates;
+    S.me = await api('/api/me');
+    toast(errors.length ? `${m.total - errors.length}/${m.total} styles created. ${errors[0]}` : `${m.total} style${m.total === 1 ? '' : 's'} added to this client.`);
+  } finally { S.busy = ''; render(); }
 }
 function library() {
   return `<div class="intro"><span>LIBRARY</span><h1>Styles and creative references.</h1><p>Shared styles are available to compatible client types.</p></div>${styles(S.shared)}`;
 }
 function settings() {
   const admin = S.me?.isAdmin ? `<section class="card form"><h2>Assign plans and credits</h2><p class="muted">Each account gets its plan credits once per month. Repeat allocations for the same month are safe.</p><label>Allocation month<input class="control" id="allocation-month" type="month" value="${new Date().toISOString().slice(0, 7)}"></label>${S.adminAccounts.map(account => `<div class="row" style="margin:12px 0;gap:12px;align-items:center"><span><b>${E(account.name)}</b><small style="display:block">${E(account.email)}</small></span><select class="control" id="plan-${E(account.id)}"><option value="access" ${account.planId === 'access' ? 'selected' : ''}>Access · 0</option><option value="starter" ${account.planId === 'starter' ? 'selected' : ''}>Starter · 100</option><option value="pro" ${account.planId === 'pro' ? 'selected' : ''}>Pro · 500</option></select><button class="btn" data-a="allocate" data-id="${E(account.id)}">Allocate</button></div>`).join('')}</section>` : '';
-  return `<div class="intro"><span>SETTINGS</span><h1>Workspace settings.</h1><p>${E(S.me?.user?.email || '')}</p></div><section class="card form"><h2>${E(S.me?.credits ?? 0)} credits available</h2><p class="muted">Plan: ${E(S.me?.plan?.planId || 'access')}. A five-slide draft costs 2 credits, a rewrite costs 1, and each generated image costs 10. The service owner assigns plans and credits. Payments are not enabled yet.</p><p class="muted">OpenAI and Gemini keys are managed by the service owner in the cloud.</p><button class="btn" data-a="logout">Sign out</button></section>${admin}`;
+  return `<div class="intro"><span>SETTINGS</span><h1>Workspace settings.</h1><p>${E(S.me?.user?.email || '')}</p></div><section class="card form"><h2>${E(S.me?.credits ?? 0)} credits available</h2><p class="muted">Plan: ${E(S.me?.plan?.planId || 'access')}. A five-slide draft costs 2 credits, a rewrite costs 1, and each generated image or style costs 10. The service owner assigns plans and credits. Payments are not enabled yet.</p><p class="muted">OpenAI and Gemini keys are managed by the service owner in the cloud.</p><button class="btn" data-a="logout">Sign out</button></section>${admin}`;
 }
 function render() {
   let content =
@@ -522,6 +564,8 @@ async function act(n) {
       S.tab = n.dataset.v;
       return render();
     }
+    if (a === 'maker-design') { S.maker.designId = n.dataset.v; return render(); }
+    if (a === 'maker-generate' || a === 'maker-all') return generateStyles(a === 'maker-all' ? DESIGN_SYSTEMS : DESIGN_SYSTEMS.filter(d => d.id === S.maker.designId));
     if (a === "confirm-design") {
       const images = (S.import.images || []).slice(0, 5);
       if (images.length !== 5)
@@ -749,6 +793,7 @@ root.onclick = (e) => {
 };
 root.oninput = (e) => {
   let x = e.target;
+  if (x.dataset.maker && x.dataset.maker !== 'provider') S.maker[x.dataset.maker] = x.value;
   if (x.dataset.regenerationNote !== undefined) {
     S.regenerationNotes[S.i] = x.value;
     return;
@@ -779,6 +824,23 @@ root.oninput = (e) => {
 root.onchange = async (e) => {
   const x = e.target;
   try {
+    if (x.dataset.maker === 'provider') {
+      S.maker.provider = x.value;
+      S.maker.model = IMAGE_MODELS[x.value]?.[0]?.[0] || '';
+      return render();
+    }
+    if (['maker-logo', 'maker-mood'].includes(x.dataset.file) && x.files?.[0]) {
+      const file = x.files[0];
+      if (!['image/png', 'image/jpeg', 'image/webp'].includes(file.type) || file.size > 12_000_000) throw Error('Choose a PNG, JPEG or WebP image under 12 MB.');
+      const key = x.dataset.file === 'maker-logo' ? 'logo' : 'mood';
+      S.maker[`${key}Image`] = await fileDataUrl(file);
+      S.maker[`${key}Name`] = file.name;
+      if (key === 'logo') {
+        const colors = await analyzeLogoColors(S.maker.logoImage);
+        S.maker.primary = colors.primary; S.maker.accent = colors.accent;
+      }
+      return render();
+    }
     if (x.dataset.languagePreset !== undefined) {
       if (x.value === "custom") {
         S.customLanguage = true;
