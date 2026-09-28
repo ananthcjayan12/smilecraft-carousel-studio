@@ -47,13 +47,13 @@ export async function provision(env = process.env, fetcher = fetch) {
   config.queues.producers[0].queue = names.queue;
   config.queues.consumers[0].queue = names.queue;
   config.queues.consumers[0].dead_letter_queue = names.deadQueue;
-  config.vars = { APP_ORIGIN: origin };
+  config.vars = { APP_ORIGIN: origin, ADMIN_EMAIL: env.ADMIN_EMAIL || '' };
   if (!new URL(origin).hostname.endsWith('.workers.dev')) config.routes = [{ pattern: new URL(origin).hostname, custom_domain: true }];
   await writeFile('wrangler.generated.json', JSON.stringify(config, null, 2) + '\n');
   const state = { ...names, origin, databaseId: config.d1_databases[0].database_id,
     created: { database: db.created, bucket: bucket.created, queue: queue.created, deadQueue: deadQueue.created } };
   await writeFile('.cloudflare-state.json', JSON.stringify(state, null, 2) + '\n');
-  const summary = `\n### Carousel Studio v3 infrastructure\n\n- D1: ${names.database} (${db.created ? 'created' : 'reused'})\n- Private R2: ${names.bucket} (${bucket.created ? 'created' : 'reused'})\n- Job queue: ${names.queue} (${queue.created ? 'created' : 'reused'})\n- Dead-letter queue: ${names.deadQueue} (${deadQueue.created ? 'created' : 'reused'})\n- Bootstrap URL: ${origin}\n\nThe customer app remains gated until authentication, account isolation, credits and provider jobs are migrated.\n`;
+  const summary = `\n### Carousel Studio v3 infrastructure\n\n- D1: ${names.database} (${db.created ? 'created' : 'reused'})\n- Private R2: ${names.bucket} (${bucket.created ? 'created' : 'reused'})\n- Job queue: ${names.queue} (${queue.created ? 'created' : 'reused'})\n- Dead-letter queue: ${names.deadQueue} (${deadQueue.created ? 'created' : 'reused'})\n- App URL: ${origin}\n`;
   if (env.GITHUB_STEP_SUMMARY) await appendFile(env.GITHUB_STEP_SUMMARY, summary);
   console.log(summary);
   return state;

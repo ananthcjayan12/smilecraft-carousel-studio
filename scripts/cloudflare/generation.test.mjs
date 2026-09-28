@@ -1,0 +1,94 @@
+import { test } from 'node:test';
+import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
+import Database from 'better-sqlite3';
+import { apiRoute, getProject } from '../../cloudflare/studio.mjs';
+import { runJob, consumeJob } from '../../cloudflare/generation.mjs';
+
+function fixture() {
+  const sqlite = new Database(':memory:');
+  for (const name of ['0001_accounts_credits.sql', '0002_studio.sql', '0003_manual_plans.sql', '0004_job_corrections.sql']) sqlite.exec(readFileSync(`cloudflare/migrations/${name}`, 'utf8'));
+  const DB = {
+    prepare(sql) {
+      return { bind(...params) {
+        const statement = sqlite.prepare(sql);
+        return {
+          first: async () => statement.get(...params),
+          all: async () => ({ results: statement.all(...params) }),
+          run: async () => ({ meta: statement.run(...params) }),
+          execute: () => ({ meta: statement.run(...params) })
+        };
+      } };
+    },
+    batch(statements) { return Promise.resolve(sqlite.transaction(() => statements.map(statement => statement.execute()))()); }
+  };
+  sqlite.exec("INSERT INTO accounts(id,name) VALUES('a','Test'); INSERT INTO clients(id,account_id,name,business_pack_id,profile_json,brand_json,created_at,updated_at) VALUES('c','a','Test Brand','general','{}','{}','2026-09-28','2026-09-28'); INSERT INTO credit_ledger(id,account_id,amount,kind,source_id) VALUES('grant','a',3,'manual_plan','month');");
+  const messages = [];
+  const env = { DB, APP_ORIGIN: 'https://test.example', OPENAI_API_KEY: 'test-key', GENERATION: { send: async message => messages.push(message) } };
+  return { sqlite, env, messages };
+}
+
+async function project(env) {
+  const response = await apiRoute(new Request('https://test.example/api/clients/c/projects', { method: 'POST', body: JSON.stringify({ topic: 'A useful tip' }) }), env, { account_id: 'a' }, new URL('https://test.example/api/clients/c/projects'));
+  assert.equal(response.status, 201);
+  return (await response.json()).project;
+}
+
+test('queued draft reserves once and settles credits with the saved project', async () => {
+  const { sqlite, env, messages } = fixture();
+  const p = await project(env);
+  const input = { stage: 'draft', provider: 'openai', model: 'gpt-5.6-sol', idempotencyKey: crypto.randomUUID() };
+  const queued = await runJob(env, 'a', 'c', p, input);
+  assert.equal(queued.job.status, 'queued');
+  assert.deepEqual(await runJob(env, 'a', 'c', p, input), { job: { ...queued.job, error: '', createdAt: sqlite.prepare('SELECT created_at FROM generation_jobs WHERE id=?').get(queued.job.id).created_at } });
+  assert.equal(messages.length, 1);
+  assert.equal(sqlite.prepare("SELECT SUM(amount) AS amount FROM credit_reservations WHERE status='reserved'").get().amount, 2);
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async () => Response.json({ choices: [{ message: { content: JSON.stringify({ slides: Array.from({ length: 5 }, (_, i) => ({ heading: `Slide ${i + 1}`, body: 'Useful information', visualPrompt: 'Clean illustration' })), instagram: 'Caption', facebook: 'Caption', youtubeTitle: 'Video', youtubeDescription: 'Description' }) } }] });
+  try { await consumeJob(env, queued.job.id); } finally { globalThis.fetch = originalFetch; }
+  assert.equal(sqlite.prepare('SELECT status,error FROM generation_jobs WHERE id=?').get(queued.job.id).status, 'succeeded');
+  assert.equal(sqlite.prepare('SELECT SUM(amount) AS amount FROM credit_ledger WHERE account_id=?').get('a').amount, 1);
+  assert.equal(sqlite.prepare('SELECT status FROM credit_reservations WHERE job_id=?').get(queued.job.id).status, 'settled');
+  assert.equal((await getProject(env, 'a', 'c', p.id)).slides[0].heading, 'Slide 1');
+  sqlite.close();
+});
+
+test('failed provider request releases reserved credits', async () => {
+  const { sqlite, env } = fixture();
+  const p = await project(env);
+  const queued = await runJob(env, 'a', 'c', p, { stage: 'draft', provider: 'openai', model: 'gpt-5.6-sol', idempotencyKey: crypto.randomUUID() });
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async () => Response.json({ error: { code: 'invalid_api_key' } }, { status: 401 });
+  try { await consumeJob(env, queued.job.id); } finally { globalThis.fetch = originalFetch; }
+  assert.equal(sqlite.prepare('SELECT status FROM generation_jobs WHERE id=?').get(queued.job.id).status, 'failed');
+  assert.equal(sqlite.prepare('SELECT status FROM credit_reservations WHERE job_id=?').get(queued.job.id).status, 'released');
+  assert.equal(sqlite.prepare('SELECT SUM(amount) AS amount FROM credit_ledger WHERE account_id=?').get('a').amount, 3);
+  sqlite.close();
+});
+
+test('image job stores private artwork and charges after attaching it to the slide', async () => {
+  const { sqlite, env } = fixture();
+  sqlite.prepare("INSERT INTO credit_ledger(id,account_id,amount,kind,source_id) VALUES('image-grant','a',20,'manual_plan','image-month')").run();
+  const p = await project(env);
+  const current = sqlite.prepare('SELECT project_json FROM projects WHERE id=?').get(p.id);
+  const value = JSON.parse(current.project_json);
+  value.slides[0].approved = true;
+  sqlite.prepare('UPDATE projects SET project_json=? WHERE id=?').run(JSON.stringify(value), p.id);
+  const objects = new Map();
+  env.STATIC = { fetch: async () => new Response(new Uint8Array([0xff, 0xd8, 0xff]), { headers: { 'Content-Type': 'image/jpeg' } }) };
+  env.ASSETS = { put: async (key, bytes) => objects.set(key, bytes), delete: async key => objects.delete(key) };
+  const refreshed = await getProject(env, 'a', 'c', p.id);
+  const queued = await runJob(env, 'a', 'c', refreshed, { stage: 'image', slideIndex: 0, provider: 'openai', model: 'gpt-image-2', correction: 'Brighter colors', idempotencyKey: crypto.randomUUID() });
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async (_url, options) => {
+    assert.equal(options.body.get('prompt').includes('Brighter colors'), true);
+    return Response.json({ data: [{ b64_json: 'iVBORw0KGgo=' }] });
+  };
+  try { await consumeJob(env, queued.job.id); } finally { globalThis.fetch = originalFetch; }
+  const finalJob = sqlite.prepare('SELECT status,error FROM generation_jobs WHERE id=?').get(queued.job.id);
+  assert.equal(finalJob.status, 'succeeded', finalJob.error);
+  assert.equal(sqlite.prepare('SELECT SUM(amount) AS amount FROM credit_ledger WHERE account_id=?').get('a').amount, 13);
+  assert.equal(objects.size, 1);
+  assert.ok((await getProject(env, 'a', 'c', p.id)).slides[0].artworkAssetId);
+  sqlite.close();
+});

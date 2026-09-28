@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { spawnSync } from 'node:child_process';
 
-export const providerSecretNames = ['OPENAI_API_KEY', 'GEMINI_API_KEY'];
+export const providerSecretNames = ['OPENAI_API_KEY', 'GEMINI_API_KEY', 'GOOGLE_CLIENT_ID', 'GOOGLE_CLIENT_SECRET'];
 export function providerSecrets(env) {
   return Object.fromEntries(providerSecretNames.filter(name => env[name]).map(name => [name, env[name]]));
 }
@@ -20,7 +20,7 @@ export async function deploy(env = process.env, run = spawnSync) {
     }
     const result = run('npx', args, { stdio: 'inherit', env });
     if (result.error || result.status !== 0) throw new Error('Cloudflare Worker deployment failed. Review Wrangler output.');
-    console.log(`Worker deployed; ${Object.keys(secrets).length} provider secret value(s) uploaded in this run. Secret values were not printed.`);
+    console.log(`Worker deployed; ${Object.keys(secrets).length} secret value(s) uploaded in this run. Secret values were not printed.`);
   } finally {
     await rm(directory, { recursive: true, force: true });
   }

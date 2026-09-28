@@ -32,6 +32,7 @@ jobs:
           QUEUE_NAME: ${{ vars.QUEUE_NAME }}
           DEAD_QUEUE_NAME: ${{ vars.DEAD_QUEUE_NAME }}
           APP_ORIGIN: ${{ vars.APP_ORIGIN }}
+          ADMIN_EMAIL: ${{ vars.ADMIN_EMAIL }}
         run: |
           npm run cloudflare:prepare
           npx --no-install wrangler d1 migrations apply DB --remote --config wrangler.generated.json
@@ -41,6 +42,8 @@ jobs:
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          GOOGLE_CLIENT_ID: ${{ secrets.GOOGLE_CLIENT_ID }}
+          GOOGLE_CLIENT_SECRET: ${{ secrets.GOOGLE_CLIENT_SECRET }}
         run: npm run cloudflare:deploy
-      - name: Verify gated bootstrap
+      - name: Verify cloud app and account gate
         run: npm run cloudflare:smoke

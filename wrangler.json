@@ -4,6 +4,8 @@
   "main": "cloudflare/worker.mjs",
   "compatibility_date": "2026-09-25",
   "workers_dev": true,
+  "triggers": { "crons": ["*/15 * * * *"] },
+  "assets": { "directory": "./web", "binding": "STATIC", "run_worker_first": ["/", "/login", "/health", "/api/*"] },
   "d1_databases": [
     {
       "binding": "DB",

@@ -1,6 +1,6 @@
 # Carousel Studio v3 — web-only product branch
 
-This branch starts the web-only successor to `v.a.1`. The original desktop version remains on the `v.a.1` branch. The existing creative workflow runs locally in a browser. The hosted version follows [PostPilot's Cloudflare pattern](docs/V3-WEB-ARCHITECTURE.md): Worker, D1, private R2 and a Queue. The [GitHub Actions bootstrap guide](docs/V3-CLOUDFLARE-DEPLOY.md) explains the one-time setup and the workflow that creates those resources. Customer login, subscriptions and credit enforcement are not implemented yet.
+This branch is the web-only successor to `v.a.1`. The original desktop version remains on the `v.a.1` branch. The hosted version follows [PostPilot's Cloudflare pattern](docs/V3-WEB-ARCHITECTURE.md): Worker, D1, private R2 and a Queue. The [Cloudflare deployment guide](docs/V3-CLOUDFLARE-DEPLOY.md) explains the one-time setup and workflow. Customer login and plan credits are implemented in the Worker; payments are deferred.
 
 ## What changed
 
@@ -12,9 +12,9 @@ Template references can be client-private or shared. The ZIP importer accepts ST
 
 ## Web-only direction
 
-There is no desktop build or customer API-key form in v3. AI keys are configured by the service owner on the server. For the future hosted service, users will sign in, select a plan, receive credits after payment, and spend those credits on generation. The current local prototype does **not** enforce login, account isolation or credits; it refuses public network binding to prevent accidental exposure. The deploy workflow currently publishes a gated bootstrap Worker and provisions Cloudflare resources; it does not publish this local Node app. See the architecture document for the migration and launch gates.
+There is no desktop build or customer API-key form in v3. The hosted Cloudflare Worker serves the browser app with Google sign-in, private D1 workspaces, private R2 assets, queued generation, and plan credits allocated by the service owner. Payments are intentionally deferred. The separate `npm start` Node prototype remains for local development and does **not** enforce hosted account controls; it refuses public network binding. See the [cloud deployment guide](docs/V3-CLOUDFLARE-DEPLOY.md).
 
-For Cloudflare, set `OPENAI_API_KEY` and `GEMINI_API_KEY` as GitHub Actions **secrets**. The [deployment workflow](.github/workflows/deploy-cloudflare.yml) runs on pushes to `v3` and uploads them as encrypted Worker secrets; the future API will read them only in backend code. The local Node app reads the same variable names from its own process environment.
+For Cloudflare, set `OPENAI_API_KEY`, `GEMINI_API_KEY`, `GOOGLE_CLIENT_ID`, and `GOOGLE_CLIENT_SECRET` as GitHub Actions **secrets**. The [deployment workflow](.github/workflows/deploy-cloudflare.yml) runs on pushes to `v3` and uploads them as encrypted Worker secrets; only backend code reads them. The local Node prototype reads provider keys from its own process environment.
 
 ## Install and run
 

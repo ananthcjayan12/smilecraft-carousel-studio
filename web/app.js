@@ -18,6 +18,8 @@ const root = document.querySelector("#app"),
         })[c],
     );
 let S = {
+  me: null,
+  adminAccounts: [],
   view: "home",
   packs: [],
   clients: [],
@@ -45,12 +47,14 @@ let S = {
 };
 const api = async (u, d, m = d === undefined ? "GET" : "POST", raw = false) => {
   let o = { method: m, headers: {} };
+  if (m !== 'GET' && S.me?.csrf) o.headers['X-CSRF-Token'] = S.me.csrf;
   if (d !== undefined) {
     o.body = raw ? d : JSON.stringify(d);
     o.headers["Content-Type"] = raw ? "application/zip" : "application/json";
   }
   let r = await fetch(u, o),
     j = await r.json().catch(() => ({}));
+  if (r.status === 401) { location.assign('/login'); throw Error('Sign in to continue.'); }
   if (!r.ok) throw Error(j.error || `Request failed (${r.status}${r.status === 413 ? ": file is too large" : ""}).`);
   return j;
 };
@@ -88,6 +92,8 @@ const status = (p) => {
           : "Brief started";
 };
 async function load() {
+  S.me = await api('/api/me');
+  S.adminAccounts = S.me.isAdmin ? (await api('/api/admin/accounts')).accounts : [];
   let [a, b, c, d, e, f] = await Promise.all([
     api("/api/business-packs"),
     api("/api/clients"),
@@ -148,7 +154,7 @@ function nav() {
     )
     .join(
       "",
-    )}<p class="side-note"><b>Make ideas publish-ready.</b>Draft, review and export in one calm workflow.</p></aside>`;
+    )}<p class="side-note"><b>${E(S.me?.credits ?? 0)} credits available</b>Draft 2 · rewrite 1 · image 10</p></aside>`;
 }
 function shell(x) {
   root.innerHTML = `<div class="shell">${nav()}<main><header><span>Carousel Studio${S.client ? " / " + E(S.client.name) : ""}</span><button class="btn primary" data-a="nav" data-v="create">＋ Create carousel</button></header>${x}</main></div>`;
@@ -208,15 +214,15 @@ const img = (t) => {
     ? `/api/template-assets/${r.assetId}`
     : `/api/clients/${S.client?.id}/assets/${r.assetId}`;
 };
-function styles(ts, upload = false) {
-  return `<section class="card form"><div class="style-head"><div><h2>Visual styles</h2><p class="muted">Choose a style for consistent carousel artwork.</p></div>${upload ? `<label class="btn upload">＋ Upload design package<input type="file" data-file="design-package" accept=".zip,application/zip"></label>` : ""}</div>${S.import ? `<div class="import-status ${S.import.unresolved ? "warn" : ""}"><b>${E(S.import.kind || "Design package")} detected</b><span>${E(S.import.message || `${S.import.images?.length || 0} images validated.`)}</span>${S.import.unresolved ? `<small>Confirm the detected image order to map slides 1–5.</small><button class="btn primary" data-a="confirm-design">Use detected order</button>` : `<button class="btn primary" data-a="install-design">Install for ${E(S.client.name)}</button>`}</div>` : ""}<div class="styles">${ts.map((t) => `<div>${img(t) ? `<img src="${img(t)}">` : "✦"}<b>${E(t.name)}</b><small>${t.clientId === null ? "Shared" : "Private"} style</small></div>`).join("") || '<div class="empty">No styles installed yet. Upload a ZIP design package above.</div>'}</div></section>`;
+function styles(ts) {
+  return `<section class="card form"><div class="style-head"><div><h2>Visual styles</h2><p class="muted">Choose a style for consistent carousel artwork.</p></div></div><div class="styles">${ts.map((t) => `<div>${img(t) ? `<img src="${img(t)}">` : "✦"}<b>${E(t.name)}</b><small>${t.clientId === null ? "Shared" : "Private"} style</small></div>`).join("") || '<div class="empty">No styles installed yet.</div>'}</div></section>`;
 }
 function library() {
   return `<div class="intro"><span>LIBRARY</span><h1>Styles and creative references.</h1><p>Shared styles are available to compatible client types.</p></div>${styles(S.shared)}`;
 }
 function settings() {
-  return `<div class="intro"><span>SETTINGS</span><h1>Workspace settings.</h1><p>AI providers are configured by the service owner on the server.</p></div>
-  <section class="card form"><h2>AI service</h2><p class="muted">Your workspace does not need a provider API key. The service owner manages provider access; account plans and credits are being designed for v3.</p></section>`;
+  const admin = S.me?.isAdmin ? `<section class="card form"><h2>Assign plans and credits</h2><p class="muted">Each account gets its plan credits once per month. Repeat allocations for the same month are safe.</p><label>Allocation month<input class="control" id="allocation-month" type="month" value="${new Date().toISOString().slice(0, 7)}"></label>${S.adminAccounts.map(account => `<div class="row" style="margin:12px 0;gap:12px;align-items:center"><span><b>${E(account.name)}</b><small style="display:block">${E(account.email)}</small></span><select class="control" id="plan-${E(account.id)}"><option value="access" ${account.planId === 'access' ? 'selected' : ''}>Access · 0</option><option value="starter" ${account.planId === 'starter' ? 'selected' : ''}>Starter · 100</option><option value="pro" ${account.planId === 'pro' ? 'selected' : ''}>Pro · 500</option></select><button class="btn" data-a="allocate" data-id="${E(account.id)}">Allocate</button></div>`).join('')}</section>` : '';
+  return `<div class="intro"><span>SETTINGS</span><h1>Workspace settings.</h1><p>${E(S.me?.user?.email || '')}</p></div><section class="card form"><h2>${E(S.me?.credits ?? 0)} credits available</h2><p class="muted">Plan: ${E(S.me?.plan?.planId || 'access')}. A five-slide draft costs 2 credits, a rewrite costs 1, and each generated image costs 10. The service owner assigns plans and credits. Payments are not enabled yet.</p><p class="muted">OpenAI and Gemini keys are managed by the service owner in the cloud.</p><button class="btn" data-a="logout">Sign out</button></section>${admin}`;
 }
 function render() {
   let content =
@@ -397,6 +403,7 @@ async function job(stage, extra = {}) {
     S.imageProgress = { completed: 0, total: 1, active: 1, failed: 0 };
   render();
   try {
+    clearTimeout(timer);
     await save();
     let g = S.p.generation || {},
       r = await api(`/api/clients/${S.client.id}/projects/${S.p.id}/jobs`, {
@@ -406,7 +413,9 @@ async function job(stage, extra = {}) {
         ...extra,
         idempotencyKey: crypto.randomUUID(),
       });
-    if (r.project) S.p = r.project;
+    if (r.job) await waitForJob(r.job.id);
+    else if (r.project) S.p = r.project;
+    S.me = await api('/api/me');
     if (stage === "image") S.imageProgress.completed = 1;
     toast(stage === "image" ? "Slide artwork is ready to review." : "Ready for review.");
   } catch (e) {
@@ -417,9 +426,30 @@ async function job(stage, extra = {}) {
     render();
   }
 }
+async function waitForJob(id) {
+  const base = `/api/clients/${S.client.id}/projects/${S.p.id}`;
+  for (let attempt = 0; attempt < 180; attempt++) {
+    const { job: current } = await api(`${base}/jobs/${id}`);
+    if (current.status === 'succeeded') {
+      S.p = (await api(base)).project;
+      return;
+    }
+    if (['failed', 'cancelled'].includes(current.status)) throw Error(current.error || 'Generation failed. Credits were returned.');
+    await new Promise(resolve => setTimeout(resolve, 2000));
+  }
+  throw Error('Generation is still running. Reopen this project to see the result.');
+}
 async function act(n) {
   try {
     let a = n.dataset.a;
+    if (a === 'logout') { await api('/api/auth/logout', {}, 'POST'); location.assign('/login'); return; }
+    if (a === 'allocate') {
+      const accountId = n.dataset.id;
+      const planId = document.getElementById(`plan-${accountId}`).value;
+      const period = document.getElementById('allocation-month').value;
+      await api(`/api/admin/accounts/${accountId}/allocate`, { planId, period });
+      await load(); render(); toast('Plan and monthly credits assigned.'); return;
+    }
     if (a === "nav") {
       S.view = n.dataset.v;
       S.client = S.p = null;
@@ -609,19 +639,22 @@ async function act(n) {
       };
       render();
       try {
+        clearTimeout(timer);
         await save();
         const g = S.p.generation;
         const batch = await runConcurrent(
           ids,
-          3,
-          (i) =>
-            api(`/api/clients/${S.client.id}/projects/${S.p.id}/jobs`, {
+          1,
+          async (i) => {
+            const created = await api(`/api/clients/${S.client.id}/projects/${S.p.id}/jobs`, {
               stage: "image",
               provider: g.provider,
               model: g.model,
               slideIndex: i,
               idempotencyKey: crypto.randomUUID(),
-            }),
+            });
+            await waitForJob(created.job.id);
+          },
           {
             onStart: ({ active }) => {
               S.imageProgress.active = active;
@@ -638,6 +671,7 @@ async function act(n) {
         S.p = (
           await api(`/api/clients/${S.client.id}/projects/${S.p.id}`)
         ).project;
+        S.me = await api('/api/me');
         const failed = batch.results.filter(
           (result) => result.status === "rejected",
         ).length;
@@ -795,5 +829,4 @@ root.onchange = async (e) => {
     render();
   }
 };
-await load();
-render();
+try { await load(); render(); } catch (error) { root.textContent = error.message; }
