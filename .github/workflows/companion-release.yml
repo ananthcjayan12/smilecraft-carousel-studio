@@ -2,6 +2,7 @@ name: Build companion installers
 on:
   workflow_dispatch:
   push:
+    branches: [v3, main]
     tags: ['companion-v*']
   pull_request:
     paths:
