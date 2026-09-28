@@ -12,6 +12,10 @@ storage/
 *.log
 .playwright-cli/
 output/playwright/
+.wrangler/
+.worker-build/
+wrangler.generated.json
+.cloudflare-state.json
 
 # OS files
 .DS_Store

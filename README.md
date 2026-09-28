@@ -1,6 +1,6 @@
 # Carousel Studio v3 — web-only product branch
 
-This branch starts the web-only successor to `v.a.1`. The original desktop version remains on the `v.a.1` branch. The existing creative workflow runs in a browser; the proposed hosted account, login, subscription and credit system is specified in [`docs/V3-WEB-ARCHITECTURE.md`](docs/V3-WEB-ARCHITECTURE.md) and is not implemented yet.
+This branch starts the web-only successor to `v.a.1`. The original desktop version remains on the `v.a.1` branch. The existing creative workflow runs locally in a browser. The hosted version follows [PostPilot's Cloudflare pattern](docs/V3-WEB-ARCHITECTURE.md): Worker, D1, private R2 and a Queue. The [GitHub Actions bootstrap guide](docs/V3-CLOUDFLARE-DEPLOY.md) explains the one-time setup and the workflow that creates those resources. Customer login, subscriptions and credit enforcement are not implemented yet.
 
 ## What changed
 
@@ -12,7 +12,7 @@ Template references can be client-private or shared. The ZIP importer accepts ST
 
 ## Web-only direction
 
-There is no desktop build or customer API-key form in v3. AI keys are configured by the service owner on the server. For the future hosted service, users will sign in, select a plan, receive credits after payment, and spend those credits on generation. The current local prototype does **not** enforce login, account isolation or credits; it refuses public network binding to prevent accidental exposure. See the architecture document for the migration and launch gates.
+There is no desktop build or customer API-key form in v3. AI keys are configured by the service owner on the server. For the future hosted service, users will sign in, select a plan, receive credits after payment, and spend those credits on generation. The current local prototype does **not** enforce login, account isolation or credits; it refuses public network binding to prevent accidental exposure. The deploy workflow currently publishes a gated bootstrap Worker and provisions Cloudflare resources; it does not publish this local Node app. See the architecture document for the migration and launch gates.
 
 ## Install and run
 

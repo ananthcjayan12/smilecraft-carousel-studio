@@ -1,60 +1,43 @@
-# v3: hosted web app with account credits
+# v3: low-cost Cloudflare web architecture
 
-## Product boundary
+This follows the deployment model in `/Users/ananthu/Downloads/postpilot-react/.github/workflows/deploy.yml`: GitHub Actions validates the code, creates or reuses Cloudflare resources, applies migrations, deploys a Worker, and smoke-tests its URL. `v.a.1` remains intact on its own branch.
 
-`v.a.1` remains the desktop release. `v3` is a separate, web-only branch. The owner supplies and pays the AI provider accounts; customers sign in and pay the product for a defined allowance of generation credits. Customers never enter provider API keys. A client in the creative workspace is a customer's brand, **not** a paying account.
-
-The current branch is a local web prototype. It deliberately refuses a public `HOST` because authentication, tenant ownership and credit enforcement are not implemented yet. Do not put it behind a public reverse proxy either.
-
-## Recommended shape
+## Runtime
 
 ```text
-Browser (login, workspace, credit balance)
-  -> authenticated web API (account membership + role)
-      -> PostgreSQL (accounts, projects, jobs, credit ledger)
-      -> object storage (private images, templates, exports)
-      -> durable queue -> AI workers -> owner-managed provider APIs
-      -> payment webhooks (verified, idempotent)
+Browser UI / static assets on Cloudflare Workers
+  -> same-origin Worker API (login, account/role checks, credits)
+       -> D1 (users, accounts, clients, projects, credit ledger, jobs)
+       -> private R2 (logos, template images, artwork, exports)
+       -> Cloudflare Queue -> AI consumer Worker -> owner-held provider keys
+       -> payment webhook -> D1 subscription and credit grant
 ```
 
-Use a managed identity provider for email or social sign-in and secure server-side sessions in `HttpOnly`, `Secure`, `SameSite` cookies. Create one **account** per paying customer or team. A user may belong to multiple accounts; each account owns its clients, projects, templates, assets, jobs and credit wallet. Resolve the active account from an authenticated membership on every request. Client IDs and account IDs in URLs are selectors, never proof of permission. Keep ordinary user, account admin and service admin permissions separate. A service admin route should be explicit and audited.
+This replaces the initial PostgreSQL/object-store/worker-service recommendation with PostPilot's simpler Cloudflare pattern. One Worker can serve assets, API requests and Queue jobs at first; split the job consumer later only if load or deploy risk justifies it. D1 holds metadata and small JSON. Large image bytes belong in R2. No always-on server or per-user API credentials are needed. D1, Workers, R2 Standard and Queues have included usage; actual charges rise with AI provider use, image storage and traffic. The free tier is not a spending guarantee. See [Workers pricing](https://developers.cloudflare.com/workers/platform/pricing/), [D1 pricing](https://developers.cloudflare.com/d1/platform/pricing/), [R2 pricing](https://developers.cloudflare.com/r2/pricing/) and [Queues pricing](https://developers.cloudflare.com/queues/platform/pricing/).
 
-Use PostgreSQL for shared application data and a separate private object store for images. Add `account_id` to every owned table and scope every query and asset authorization by that value. Row-level security can add a second barrier if the database role used by requests cannot bypass it. Existing local SQLite data needs an explicit, one-account-at-a-time import; do not automatically merge existing clients into a shared hosted database.
+A **paying account** owns many brand **clients**. Verified login identifies the user; membership identifies which accounts they may access. Every client, project, job and R2 key must be scoped to its account. A URL ID is only a selector. Sign-in should use managed OIDC and secure HttpOnly sessions, following the working pattern in PostPilot; it must allow customers rather than PostPilot's owner email allowlist. The exact identity provider and payment processor can be chosen independently of the Cloudflare infrastructure.
 
-The browser calls only the product API. Workers use owner-held provider keys from a secret manager. Remove Codex and Antigravity CLI modes from the hosted path. Expose a small owner-curated model catalog and version it with credit prices. Put per-account concurrency, daily spend ceilings and provider-wide limits in the worker scheduler.
+## Credit model
 
-## Credits and plans
+Offer monthly plans with fixed included credits and optional top-ups. Show costs before generation; editing, review and download need no credits. An illustrative starting schedule is 2 credits for a five-slide draft, 1 for revising a slide, and 10 for generating or regenerating a slide image. Validate these numbers against actual provider bills, retry costs and desired margin before selling plans.
 
-Define product credits as units for visible actions, not provider tokens. Example starting schedule for testing: draft five-slide copy = 2 credits; revise one slide = 1; generate or regenerate one slide image = 10. Editing, reviewing, downloading and retrying a failed job = 0. These are **illustrative units**, not a price quote. Image generation is the main cost driver, so revise this schedule from actual provider bills, output size, failed-call costs, infrastructure and payment fees before selling plans. Show the credit cost before each paid action.
+Keep an append-only credit ledger in D1. On a generation request, verify the session, account membership, project ownership and active plan. Use a stable idempotency key. Atomically create the job and reserve the quoted credits if the account has sufficient balance; publish a small job ID to the Queue. The consumer reads project data from D1, calls the owner-configured AI provider, stores output in R2 and settles the reservation once. Failure releases it once, under clearly published charging terms. Use a D1 outbox with a retrying scheduled dispatch if direct Queue publication could leave a reserved job unpublished. Repeated requests or webhook events must never grant or charge twice.
 
-Offer monthly plans with a fixed credit grant and optional prepaid top-up packs. Keep plan terms explicit: credit expiry, rollover, upgrades, downgrades, refunds and cancellation. Do not grant credits simply because checkout opened or a subscription object was created. For a monthly plan, grant once for each paid billing period after a verified successful payment event. Use the payment provider's customer portal for card and subscription changes. Keep Stripe or another payment processor as the payment source of truth; keep **app credits** in the app ledger, since those are what the API must reserve before generation.
+A verified successful payment webhook grants each paid period once. Checkout opening or a newly created subscription is insufficient. Keep the payment processor as the source of truth for payments; D1 is the source of truth for app credit usage. Publish plan terms for expiry, rollover, cancellation, failed payments and refunds.
 
-Recommended tables:
+## Deployment already scaffolded
 
-| Table | Key fields |
-| --- | --- |
-| `accounts`, `users`, `memberships` | account ID, identity provider user ID, role |
-| `plans`, `subscriptions` | plan version, included credits, payment customer/subscription IDs, period, status |
-| `credit_ledger` | account ID, signed amount, type, source ID, expiry, created time; unique `(account_id, source_id)` |
-| `credit_reservations` | account ID, job ID, quoted cost, status, expiry; unique `job_id` |
-| `generation_jobs` | account ID, project ID, stage, provider/model, status, idempotency key, actual cost |
-| `payment_events` | processor event ID unique, processing status, timestamp |
+The manual [Cloudflare workflow](../.github/workflows/deploy-cloudflare.yml) runs on `v3`. It creates or reuses one D1 database, one **private** R2 bucket, a job Queue and a dead-letter Queue; applies [D1 migrations](../cloudflare/migrations/0001_accounts_credits.sql); deploys a bootstrap Worker; and checks that unfinished customer APIs return 503. Resource names default to `carousel-studio-v3-*` and can be set by GitHub variables. Provisioning is idempotent and refuses a public R2 bucket. The Worker and API are deliberately gated: deploying this bootstrap does not launch the paid service.
 
-For each generation request, in one database transaction: authenticate membership, verify project ownership and model eligibility, find or create the idempotent job, check spend and balance, and reserve the quoted credits. Enqueue the job through a transactional outbox. A worker settles the reservation once on success; a failure or cancellation releases it once. A retry must reuse the same job/reservation or obtain a fresh reservation explicitly. If provider calls can be billed despite failure, define which failures consume credits in the published terms and account for that in settlement. The balance displayed in UI is settled credits minus active reservations, derived server-side. Never accept a balance, plan or unit price from the browser.
+One-time setup remains in the Cloudflare and GitHub dashboards: activate Workers/R2/Queues where required, configure a `workers.dev` subdomain, create a scoped Cloudflare API token, and enter the account ID/token as GitHub secrets. OAuth and payment applications, plus their keys and callback URLs, must be created at the provider. The workflow cannot accept provider terms or create those external accounts for you.
 
-Verify payment webhook signatures against the raw body, store each event ID, and make credit grants unique by paid invoice and period. Events can repeat or arrive out of order; reconcile subscription state from the payment provider when needed. An unpaid, expired or cancelled plan must stop new reservations according to the published grace policy, while completed work remains accessible.
+## Migration required before customer launch
 
-## Migration from current server
+1. Port the existing Node/SQLite server to a Cloudflare Worker API using asynchronous D1 queries. `better-sqlite3`, the local filesystem and CLI subprocess adapters cannot be deployed there. Keep the current browser UI, but serve it as Worker static assets after API parity is reached.
+2. Finish account-scoped tables for clients, projects, templates and assets. Import existing local data only into a chosen account. Authorize every route and R2 download. Remove the legacy unmetered generation routes.
+3. Add OIDC login and secure sessions, then account membership checks and two-account isolation tests. A browser-supplied client or account ID cannot grant access.
+4. Implement reservation/settlement, Queue consumer, retries, dead-letter handling, spend limits and provider secrets. Put all AI actions through this path.
+5. Add paid checkout/webhook handling, plan UI, balance/history and insufficient-credit flow. Test repeated and out-of-order webhooks and concurrent generation.
+6. Replace the bootstrap Worker with the complete app, enable push-triggered production deployment, and change the smoke test to require authenticated app behavior. Back up D1 and R2 independently.
 
-1. Add account, membership and role tables; integrate hosted sign-in and sign-out. Every `/api/*` route must either authenticate and authorize or be explicitly public. Remove or protect legacy flat-file and migration routes before opening network access.
-2. Migrate `clients`, `projects`, `assets`, `templates`, `jobs` and template imports to account-scoped PostgreSQL. Test two accounts against **every** list, detail, write and asset route. Keep shared built-in templates explicitly global and read-only to customers.
-3. Move generated and uploaded files to private object storage. Authorize each asset request before a short-lived download URL. Keep backups, deletion and retention policies tied to accounts.
-4. Replace synchronous AI calls in HTTP requests with a durable queue and workers. Record a stable request idempotency key, timeouts, retries and final job state.
-5. Implement the credit ledger and reservation transaction. Route **all** text, image and template generation through the same charging gateway; remove old unmetered generation endpoints.
-6. Integrate subscription checkout, verified webhooks, account billing page and customer portal. Exercise repeated, delayed and out-of-order events, payment failure, renewal and cancellation in test mode.
-7. Add account UI for login, current plan, available/reserved credits, transaction history and an insufficient-credit flow. Choose plan amounts only after measuring real unit economics.
-8. After security and billing checks pass, enable public HTTPS hosting, monitoring, backups, rate limits and spend alerts.
-
-Release gates: unauthenticated requests cannot read or mutate tenant data; account A cannot access account B by guessing IDs; concurrent paid requests cannot overspend; duplicated requests and webhooks cannot charge or grant twice; failed jobs release reservations correctly; no browser response contains provider keys or server filesystem paths.
-
-References: [OWASP multi-tenant security guidance](https://cheatsheetseries.owasp.org/cheatsheets/Multi_Tenant_Security_Cheat_Sheet.html), [Stripe usage-based pricing models](https://docs.stripe.com/billing/subscriptions/usage-based/pricing-models), [Stripe events API](https://docs.stripe.com/api/events).
+Do not expose the local Node server through a proxy in the meantime. The bootstrap Worker is safe to deploy for resource setup, but it is intentionally a maintenance page. [OWASP's tenant guidance](https://cheatsheetseries.owasp.org/cheatsheets/Multi_Tenant_Security_Cheat_Sheet.html) describes the isolation checks required before public launch.

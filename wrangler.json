@@ -1,0 +1,22 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "carousel-studio-v3",
+  "main": "cloudflare/worker.mjs",
+  "compatibility_date": "2026-09-25",
+  "workers_dev": true,
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "carousel-studio-v3-db",
+      "database_id": "00000000-0000-0000-0000-000000000000",
+      "migrations_dir": "cloudflare/migrations"
+    }
+  ],
+  "r2_buckets": [{ "binding": "ASSETS", "bucket_name": "carousel-studio-v3-assets" }],
+  "queues": {
+    "producers": [{ "binding": "GENERATION", "queue": "carousel-studio-v3-jobs" }],
+    "consumers": [{ "queue": "carousel-studio-v3-jobs", "max_batch_size": 1, "max_retries": 3, "dead_letter_queue": "carousel-studio-v3-dead", "max_concurrency": 2 }]
+  },
+  "vars": { "APP_ORIGIN": "http://localhost:8787" },
+  "observability": { "enabled": true }
+}

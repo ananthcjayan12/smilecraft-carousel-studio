@@ -1,0 +1,38 @@
+name: Bootstrap v3 on Cloudflare
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: carousel-v3-cloudflare
+  cancel-in-progress: false
+jobs:
+  deploy:
+    if: github.ref == 'refs/heads/v3'
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - run: npm ci
+      - run: npm test
+      - run: npm run cloudflare:check
+      - name: Create or reuse Cloudflare resources
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          WORKER_NAME: ${{ vars.WORKER_NAME }}
+          D1_DATABASE_NAME: ${{ vars.D1_DATABASE_NAME }}
+          R2_BUCKET_NAME: ${{ vars.R2_BUCKET_NAME }}
+          QUEUE_NAME: ${{ vars.QUEUE_NAME }}
+          DEAD_QUEUE_NAME: ${{ vars.DEAD_QUEUE_NAME }}
+          APP_ORIGIN: ${{ vars.APP_ORIGIN }}
+        run: |
+          npm run cloudflare:prepare
+          npx --no-install wrangler d1 migrations apply DB --remote --config wrangler.generated.json
+          npx --no-install wrangler deploy --config wrangler.generated.json
+      - name: Verify gated bootstrap
+        run: npm run cloudflare:smoke
