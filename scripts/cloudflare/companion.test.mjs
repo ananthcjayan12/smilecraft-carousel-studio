@@ -112,14 +112,16 @@ test('selected local model is delivered to the companion',async()=>{
   sqlite.close();
 });
 
-test('local image model receives its reference and saves generated artwork',async()=>{
+for (const model of ['gpt-5.6-sol','gpt-5.6-terra','gpt-5.6-luna','imagegen']) test(`local image model ${model} receives its reference and saves generated artwork`,async()=>{
+  const imageCaps = structuredClone(caps);
+  imageCaps.codex.imageModels.push(...['gpt-5.6-sol','gpt-5.6-terra','gpt-5.6-luna'].map(id=>({id,label:id})));
   const {sqlite,env,viewer}=fixture();
   const objects=new Map();
   env.STATIC={fetch:async()=>new Response(new Uint8Array([137,80,78,71,13,10,26,10]),{headers:{'content-type':'image/png'}})};
   env.ASSETS={put:async(key,bytes)=>objects.set(key,bytes),get:async(key)=>objects.has(key)?{arrayBuffer:async()=>objects.get(key)}:null,delete:async(key)=>objects.delete(key)};
   const pair=await (await route(env,viewer,'/devices/pairing','POST',{})).json();
   const device=await (await route(env,null,'/pair','POST',{code:pair.code,name:'Laptop'})).json();
-  await route(env,null,'/poll','POST',caps,device.token);
+  await route(env,null,'/poll','POST',imageCaps,device.token);
   const url=new URL('https://test.example/api/clients/c/projects');
   const project=(await (await apiRoute(new Request(url,{method:'POST',body:JSON.stringify({topic:'Topic'})}),env,viewer,url)).json()).project;
   const data=JSON.parse(sqlite.prepare('SELECT project_json FROM projects WHERE id=?').get(project.id).project_json);
@@ -128,9 +130,12 @@ test('local image model receives its reference and saves generated artwork',asyn
   sqlite.prepare('UPDATE projects SET project_json=? WHERE id=?').run(JSON.stringify(data),project.id);
   const current=await getProject(env,'a','c',project.id);
   await assert.rejects(()=>enqueueCompanion(env,viewer,current,{stage:'image',slideIndex:0,provider:'codex',model:'gpt-6-sol',idempotencyKey:crypto.randomUUID()}),{status:400});
-  await enqueueCompanion(env,viewer,current,{stage:'image',slideIndex:0,provider:'codex',model:'imagegen',idempotencyKey:crypto.randomUUID()});
-  const job=(await (await route(env,null,'/poll','POST',caps,device.token)).json()).job;
-  assert.equal(job.task,'image');assert.equal(job.input.model,'imagegen');
+  await route(env,null,'/poll','POST',caps,device.token);
+  if (model !== 'imagegen') await assert.rejects(()=>enqueueCompanion(env,viewer,current,{stage:'image',slideIndex:0,provider:'codex',model,idempotencyKey:crypto.randomUUID()}),{status:409});
+  await route(env,null,'/poll','POST',imageCaps,device.token);
+  await enqueueCompanion(env,viewer,current,{stage:'image',slideIndex:0,provider:'codex',model,idempotencyKey:crypto.randomUUID()});
+  const job=(await (await route(env,null,'/poll','POST',imageCaps,device.token)).json()).job;
+  assert.equal(job.task,'image');assert.equal(job.input.model,model);
   const refs=await (await route(env,null,`/jobs/${job.id}/references`,'POST',{lease:job.lease},device.token)).json();
   assert.equal(refs.references[0].name,'reference');
   const image='data:image/png;base64,'+Buffer.from([137,80,78,71,13,10,26,10,1,2,3]).toString('base64');

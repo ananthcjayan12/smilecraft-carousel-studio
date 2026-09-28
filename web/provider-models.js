@@ -1,7 +1,7 @@
 export const IMAGE_MODELS = {
   openai: [['gpt-image-2', 'GPT Image 2'], ['gpt-image-2.5-sunburst', 'GPT Image 2.5 Sunburst'], ['gpt-image-2.5-flare', 'GPT Image 2.5 Flare'], ['gpt-image-1', 'GPT Image 1'], ['gpt-image-1-mini', 'GPT Image 1 mini']],
   gemini: [['gemini-3.1-flash-image', 'Gemini 3.1 Flash Image (Nano Banana 2)'], ['gemini-3-pro-image', 'Gemini 3 Pro Image (Nano Banana Pro)'], ['gemini-3.1-flash-lite-image', 'Gemini 3.1 Flash Lite Image'], ['gemini-2.5-flash-image', 'Gemini 2.5 Flash Image']],
-  codex: [['imagegen', 'Built-in ImageGen (model managed by Codex)']],
+  codex: [['gpt-5.6-sol', 'GPT-5.6 Sol'], ['gpt-5.6-terra', 'GPT-5.6 Terra'], ['gpt-5.6-luna', 'GPT-5.6 Luna'], ['imagegen', 'Codex default']],
   antigravity: [['gemini-3.1-flash-image', 'Nano Banana 2 (managed by Antigravity)']],
 };
 export const WRITING_MODELS = {

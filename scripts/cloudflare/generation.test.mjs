@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import Database from 'better-sqlite3';
 import { apiRoute, getProject } from '../../cloudflare/studio.mjs';
-import { runJob, consumeJob } from '../../cloudflare/generation.mjs';
+import { runJob, consumeJob, cancelJob } from '../../cloudflare/generation.mjs';
 
 function fixture() {
   const sqlite = new Database(':memory:');
@@ -56,6 +56,8 @@ test('queued draft reserves once and settles credits with the saved project', as
   assert.equal(sqlite.prepare('SELECT SUM(amount) AS amount FROM credit_ledger WHERE account_id=?').get('a').amount, 1);
   assert.equal(sqlite.prepare('SELECT status FROM credit_reservations WHERE job_id=?').get(queued.job.id).status, 'settled');
   assert.equal((await getProject(env, 'a', 'c', p.id)).slides[0].heading, 'Slide 1');
+  assert.equal((await cancelJob(env,'a',p.id,queued.job.id)).job.status,'succeeded');
+  assert.equal(sqlite.prepare('SELECT status FROM credit_reservations WHERE job_id=?').get(queued.job.id).status,'settled');
   sqlite.close();
 });
 
@@ -128,5 +130,66 @@ test('parallel hosted image jobs preserve both slides and settle both reservatio
   assert.notEqual(saved.slides[0].artworkAssetId, saved.slides[1].artworkAssetId);
   assert.equal(sqlite.prepare("SELECT COUNT(*) n FROM generation_jobs WHERE status='succeeded'").get().n, 2);
   assert.equal(sqlite.prepare("SELECT COUNT(*) n FROM credit_reservations WHERE status='settled'").get().n, 2);
+  sqlite.close();
+});
+
+
+test('cancel endpoint prevents queued provider calls, releases credits once, and scopes ownership', async () => {
+  const { sqlite, env } = fixture();
+  const p = await project(env);
+  const {job} = await runJob(env, 'a', 'c', p, {stage:'draft',provider:'openai',model:'gpt-5.6-sol',idempotencyKey:crypto.randomUUID()});
+  assert.equal(await cancelJob(env, 'another-account', p.id, job.id), null);
+  assert.equal(await cancelJob(env, 'a', 'another-project', job.id), null);
+  const url = new URL(`https://test.example/api/clients/c/projects/${p.id}/jobs/${job.id}`);
+  for (let i=0;i<2;i++) {
+    const response = await apiRoute(new Request(url,{method:'DELETE'}),env,{account_id:'a'},url);
+    assert.equal(response.status,200);
+    assert.equal((await response.json()).job.status,'cancelled');
+  }
+  const original = globalThis.fetch;
+  globalThis.fetch = async () => { assert.fail('Cancelled queued job reached provider'); };
+  try { await consumeJob(env,job.id); } finally { globalThis.fetch=original; }
+  assert.equal(sqlite.prepare('SELECT status FROM credit_reservations WHERE job_id=?').get(job.id).status,'released');
+  assert.equal(sqlite.prepare('SELECT SUM(amount) AS n FROM credit_ledger').get().n,3);
+  sqlite.close();
+});
+
+test('Stop aborts an active provider connection and keeps project and balance unchanged', async () => {
+  const { sqlite, env } = fixture();
+  const p = await project(env);
+  const {job} = await runJob(env,'a','c',p,{stage:'draft',provider:'openai',model:'gpt-5.6-sol',idempotencyKey:crypto.randomUUID()});
+  const original = globalThis.fetch;
+  let started, aborted = false;
+  const ready = new Promise(resolve => { started=resolve; });
+  globalThis.fetch = async (_url,{signal}) => new Promise((_resolve,reject) => {
+    signal.addEventListener('abort',()=>{ aborted=true; reject(signal.reason); },{once:true});
+    started();
+  });
+  try {
+    const running=consumeJob(env,job.id);
+    await ready;
+    await cancelJob(env,'a',p.id,job.id);
+    await running;
+  } finally { globalThis.fetch=original; }
+  assert.equal(aborted,true);
+  assert.equal(sqlite.prepare('SELECT status FROM generation_jobs WHERE id=?').get(job.id).status,'cancelled');
+  assert.equal((await getProject(env,'a','c',p.id)).revision,p.revision);
+  assert.equal(sqlite.prepare('SELECT SUM(amount) AS n FROM credit_ledger').get().n,3);
+  sqlite.close();
+});
+
+test('cancellation racing with a provider result cannot attach or charge it', async () => {
+  const { sqlite, env } = fixture();
+  const p = await project(env);
+  const {job} = await runJob(env,'a','c',p,{stage:'draft',provider:'openai',model:'gpt-5.6-sol',idempotencyKey:crypto.randomUUID()});
+  const original = globalThis.fetch;
+  globalThis.fetch=async()=>{
+    await cancelJob(env,'a',p.id,job.id);
+    return Response.json({choices:[{message:{content:JSON.stringify({slides:Array.from({length:5},()=>({heading:'New copy',body:'Body'}))})}}]});
+  };
+  try { await consumeJob(env,job.id); } finally { globalThis.fetch=original; }
+  assert.equal((await getProject(env,'a','c',p.id)).revision,p.revision);
+  assert.equal(sqlite.prepare('SELECT status FROM generation_jobs WHERE id=?').get(job.id).status,'cancelled');
+  assert.equal(sqlite.prepare('SELECT SUM(amount) AS n FROM credit_ledger').get().n,3);
   sqlite.close();
 });

@@ -11,7 +11,7 @@ test('saved provider/model mismatches are repaired without changing valid select
   assert.equal(repairGeneration({ provider: 'codex', model: 'gpt-image-2' }).provider, 'codex');
   assert.equal(repairGeneration({ provider: 'gemini', model: 'gpt-image-2' }).model, 'gemini-3.1-flash-image');
   assert.equal(repairGeneration({ provider: 'openai', model: 'gpt-5.6-sol' }).model, 'gpt-image-2');
-  assert.equal(repairGeneration({ provider: 'codex', model: 'gpt-5.6-terra' }).model, 'imagegen');
+  assert.equal(repairGeneration({ provider: 'codex', model: 'gpt-5.6-terra' }).model, 'gpt-5.6-terra');
   assert.equal(repairGeneration({ writingProvider: 'codex' }).writingProvider, 'codex');
   assert.equal(repairGeneration({ writingProvider: 'codex' }).writingModel, '');
   assert.equal(repairGeneration({ writingProvider: 'codex', writingModel: 'gpt-6-sol' }).writingModel, 'gpt-6-sol');
@@ -19,6 +19,15 @@ test('saved provider/model mismatches are repaired without changing valid select
   assert.equal(compatibleModel('antigravity', 'gemini-3.8-flash-high', 'image'), 'gemini-3.1-flash-image');
   assert.equal(compatibleModel('antigravity', 'gemini-3.1-flash-image', 'image'), 'gemini-3.1-flash-image');
   assert.ok(IMAGE_MODELS.antigravity.every(([id]) => id.includes('-image')));
+});
+
+test('Codex image selections survive project repair, including the explicit CLI default', () => {
+  for (const [model] of IMAGE_MODELS.codex) {
+    assert.equal(repairGeneration({ provider: 'codex', model }).model, model);
+    assert.equal(compatibleModel('codex', model, 'image'), model);
+  }
+  assert.equal(compatibleModel('codex', '', 'image'), 'gpt-5.6-sol');
+  assert.equal(compatibleModel('codex', 'gpt-image-2', 'image'), 'gpt-5.6-sol');
 });
 
 test('Codex image adapter uses built-in ImageGen and all three references', async () => {
@@ -37,16 +46,19 @@ test('Codex image adapter uses built-in ImageGen and all three references', asyn
   process.env.CODEX_BIN = binary;
   try {
     const image = bytes => 'data:image/png;base64,' + Buffer.from(bytes).toString('base64');
-    const result = await generateSlideImage({ provider: 'codex', model: 'gpt-image-2', workDir: root,
-      slideNumber: 1, slide: { approved: true, heading: 'Test', body: 'Approved copy' },
-      referenceImage: image('crop'), masterReferenceImage: image('board'), logoImage: image('logo') });
-    assert.match(result, /^data:image\/png;base64,/);
-    const recorded = JSON.parse(await readFile(capture, 'utf8'));
-    assert.equal(recorded.args.includes('--model'), false);
-    assert.deepEqual(recorded.references.map(x => Buffer.from(x, 'base64').toString()), ['crop', 'board', 'logo']);
-    assert.match(recorded.args.at(-1), /Use Codex built-in image generation/);
-    assert.match(recorded.args.at(-1), /Do NOT call the OpenAI API manually/);
-    assert.equal(recorded.apiKey, false);
+    for (const [model] of IMAGE_MODELS.codex) {
+      const result = await generateSlideImage({ provider: 'codex', model, workDir: root,
+        slideNumber: 1, slide: { approved: true, heading: 'Test', body: 'Approved copy' },
+        referenceImage: image('crop'), masterReferenceImage: image('board'), logoImage: image('logo') });
+      assert.match(result, /^data:image\/png;base64,/);
+      const recorded = JSON.parse(await readFile(capture, 'utf8'));
+      if (model === 'imagegen') assert.equal(recorded.args.includes('--model'), false);
+      else assert.equal(recorded.args[recorded.args.indexOf('--model') + 1], model);
+      assert.deepEqual(recorded.references.map(x => Buffer.from(x, 'base64').toString()), ['crop', 'board', 'logo']);
+      assert.match(recorded.args.at(-1), /Use Codex built-in image generation/);
+      assert.match(recorded.args.at(-1), /Do NOT call the OpenAI API manually/);
+      assert.equal(recorded.apiKey, false);
+    }
   } finally {
     if (prior === undefined) delete process.env.CODEX_BIN; else process.env.CODEX_BIN = prior;
     await rm(root, { recursive: true, force: true });

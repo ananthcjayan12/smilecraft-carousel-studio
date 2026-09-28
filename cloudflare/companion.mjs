@@ -1,4 +1,5 @@
 import { getProject, assetBytes, saveAsset, builtinTemplate, decodeImage } from './studio.mjs';
+import { IMAGE_MODELS } from '../web/provider-models.js';
 import { buildV1WritingPrompt, buildV1ImagePrompt } from './prompts.mjs';
 
 const json = (value, status=200) => Response.json(value, {status, headers:{'Cache-Control':'no-store'}});
@@ -11,7 +12,7 @@ const enabled = async (env, accountId) => Boolean((await env.DB.prepare('SELECT 
 const error = (message,status=400) => Object.assign(new Error(message),{status});
 const text = (value, max) => typeof value === 'string' && value.trim() && value.length <= max;
 const slide = (value, i, role) => ({id:`slide-${i+1}`,role,heading:value.heading.trim(),body:value.body.trim(),visualPrompt:value.visualPrompt.trim(),approved:false,approvedAt:'',copyRevision:1,artworkAssetId:'',artworkReviewed:false,artworkReviewedAt:''});
-const imageModels = {codex:[{id:'imagegen',label:'Codex built-in ImageGen (model managed by Codex)'}],antigravity:[{id:'gemini-3.1-flash-image',label:'Nano Banana 2 (managed by Antigravity)'}]};
+const imageModels = Object.fromEntries(['codex','antigravity'].map(provider => [provider, IMAGE_MODELS[provider].map(([id,label]) => ({id,label}))]));
 const encode = bytes => { let out=''; const b=new Uint8Array(bytes); for(let i=0;i<b.length;i+=8190) out+=btoa(String.fromCharCode(...b.subarray(i,i+8190))); return out; };
 async function imageReferences(env, job) {
   const row=await env.DB.prepare('SELECT client_id FROM projects WHERE id=? AND account_id=?').bind(job.project_id,job.account_id).first();

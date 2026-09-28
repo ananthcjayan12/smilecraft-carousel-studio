@@ -42,6 +42,43 @@ export async function runJob(env, accountId, clientId, project, input) {
   return { job: { id, stage, status: 'queued', quotedCredits: credits } };
 }
 
+// The conditional updates share one transaction with credit release. A completion
+// that wins the race remains succeeded and charged; cancellation never refunds it.
+export async function cancelJob(env, accountId, projectId, id) {
+  const row = await env.DB.prepare('SELECT * FROM generation_jobs WHERE id=? AND account_id=? AND project_id=?').bind(id, accountId, projectId).first();
+  if (!row) return null;
+  await env.DB.batch([
+    env.DB.prepare("UPDATE generation_jobs SET status='cancelled',error='Generation stopped.',finished_at=? WHERE id=? AND account_id=? AND project_id=? AND status IN ('queued','running')").bind(stamp(), id, accountId, projectId),
+    env.DB.prepare("UPDATE credit_reservations SET status='released',updated_at=? WHERE job_id=? AND status='reserved' AND EXISTS (SELECT 1 FROM generation_jobs WHERE id=? AND status='cancelled')").bind(stamp(), id, id)
+  ]);
+  return { job: jobView(await env.DB.prepare('SELECT * FROM generation_jobs WHERE id=?').bind(id).first()) };
+}
+
+async function assertRunning(env, id) {
+  const row = await env.DB.prepare('SELECT status FROM generation_jobs WHERE id=?').bind(id).first();
+  if (row?.status !== 'running') throw error('Generation stopped.', 409);
+}
+
+// A queue consumer may run in a different isolate from the DELETE request.
+// Poll durable job state and abort the provider connection, not just the UI.
+async function cancellableProviderJson(env, id, url, options) {
+  await assertRunning(env, id);
+  const controller = new AbortController();
+  let checking = null;
+  const timer = setInterval(() => {
+    if (checking) return;
+    checking = assertRunning(env, id).catch(cause => controller.abort(cause)).finally(() => { checking = null; });
+  }, 1000);
+  try {
+    const data = await providerJson(url, { ...options, signal: controller.signal });
+    await assertRunning(env, id);
+    return data;
+  } finally {
+    clearInterval(timer);
+    if (checking) await checking;
+  }
+}
+
 async function failJob(env, id, message) {
   await env.DB.batch([
     env.DB.prepare("UPDATE generation_jobs SET status='failed',error=?,finished_at=? WHERE id=? AND status IN ('queued','running')").bind(String(message).slice(0, 350), stamp(), id),
@@ -64,15 +101,15 @@ const parseJson = raw => {
   try { return JSON.parse(value); } catch { throw error('The provider returned invalid JSON. Retry generation.', 502); }
 };
 const slide = (value, index, role) => ({ id: `slide-${index + 1}`, role, heading: limit(value.heading, 100), body: limit(value.body, 240), visualPrompt: limit(value.visualPrompt, 550), approved: false, approvedAt: '', copyRevision: 1, artworkAssetId: '', artworkReviewed: false, artworkReviewedAt: '' });
-async function generateText(env, job, project) {
+async function generateText(env, job, project, request) {
   const revision = job.action === 'revise', context = project.contextSnapshot || {}, roles = context.recipe?.roles || ['Hook','Offering','Benefits','Details','CTA'];
   const prompt = buildV1WritingPrompt(revision ? 'revise' : 'draft', { contextSnapshot: { ...context, language: project.language }, topic: project.topic, notes: project.notes, slide: revision ? project.slides[job.slide_index] : undefined, correction: job.correction, referenceContext: project.templateId ? { id: project.templateId } : null });
   let raw;
   if (job.provider === 'openai') {
-    const data = await providerJson('https://api.openai.com/v1/chat/completions', { method: 'POST', headers: { Authorization: `Bearer ${env.OPENAI_API_KEY}`, 'Content-Type': 'application/json' }, body: JSON.stringify({ model: job.model_id, messages: [{ role: 'user', content: prompt }], response_format: { type: 'json_object' } }) });
+    const data = await request('https://api.openai.com/v1/chat/completions', { method: 'POST', headers: { Authorization: `Bearer ${env.OPENAI_API_KEY}`, 'Content-Type': 'application/json' }, body: JSON.stringify({ model: job.model_id, messages: [{ role: 'user', content: prompt }], response_format: { type: 'json_object' } }) });
     raw = data.choices?.[0]?.message?.content;
   } else {
-    const data = await providerJson(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(job.model_id)}:generateContent`, { method: 'POST', headers: { 'x-goog-api-key': env.GEMINI_API_KEY, 'Content-Type': 'application/json' }, body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }], generationConfig: { responseMimeType: 'application/json' } }) });
+    const data = await request(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(job.model_id)}:generateContent`, { method: 'POST', headers: { 'x-goog-api-key': env.GEMINI_API_KEY, 'Content-Type': 'application/json' }, body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }], generationConfig: { responseMimeType: 'application/json' } }) });
     raw = data.candidates?.[0]?.content?.parts?.map(part => part.text || '').join('');
   }
   const result = parseJson(raw);
@@ -92,7 +129,7 @@ function findImage(value) {
   for (const child of Object.values(value)) { const found = Array.isArray(child) ? child.map(findImage).find(Boolean) : findImage(child); if (found) return found; }
   return null;
 }
-async function generateImage(env, job, project, clientId) {
+async function generateImage(env, job, project, clientId, request) {
   const item = project.slides[job.slide_index], context = project.contextSnapshot || {};
   const prompt = buildV1ImagePrompt({ slide: item, slideNumber: job.slide_index + 1, contextSnapshot: { ...context, language: project.language }, brand: context.brand, referenceContext: project.templateId ? { id: project.templateId } : null, correction: job.correction });
   const template = builtinTemplate(project.templateId);
@@ -117,12 +154,12 @@ async function generateImage(env, job, project, clientId) {
     form.append('image[]', new Blob([referenceBytes], { type: referenceMime }), 'reference');
     const logoId = context.brand?.logoAssetId;
     if (logoId) { const logo = await assetBytes(env, job.account_id, clientId, logoId); if (logo) form.append('image[]', new Blob([logo.bytes], { type: logo.mime }), 'logo'); }
-    const data = await providerJson('https://api.openai.com/v1/images/edits', { method: 'POST', headers: { Authorization: `Bearer ${env.OPENAI_API_KEY}` }, body: form });
+    const data = await request('https://api.openai.com/v1/images/edits', { method: 'POST', headers: { Authorization: `Bearer ${env.OPENAI_API_KEY}` }, body: form });
     image = { base64: data.data?.[0]?.b64_json, mime: 'image/png' };
   } else {
     const bytes = new Uint8Array(referenceBytes);
     let base64 = ''; for (let i = 0; i < bytes.length; i += 8190) base64 += btoa(String.fromCharCode(...bytes.slice(i, i + 8190)));
-    const data = await providerJson('https://generativelanguage.googleapis.com/v1beta/interactions', { method: 'POST', headers: { 'x-goog-api-key': env.GEMINI_API_KEY, 'Content-Type': 'application/json' }, body: JSON.stringify({ model: job.model_id, input: [{ type: 'text', text: prompt }, { type: 'image', mime_type: referenceMime, data: base64 }], response_format: { type: 'image', mime_type: 'image/png', aspect_ratio: '4:5', image_size: '2K' } }) });
+    const data = await request('https://generativelanguage.googleapis.com/v1beta/interactions', { method: 'POST', headers: { 'x-goog-api-key': env.GEMINI_API_KEY, 'Content-Type': 'application/json' }, body: JSON.stringify({ model: job.model_id, input: [{ type: 'text', text: prompt }, { type: 'image', mime_type: referenceMime, data: base64 }], response_format: { type: 'image', mime_type: 'image/png', aspect_ratio: '4:5', image_size: '2K' } }) });
     image = findImage(data);
   }
   if (!image?.base64) throw error('The provider returned no artwork.', 502);
@@ -141,8 +178,10 @@ export async function consumeJob(env, id) {
     if (!row) throw error('Project no longer exists.', 404);
     const project = await getProject(env, claimed.account_id, row.client_id, claimed.project_id);
     if (!project) throw error('Project no longer exists.', 404);
-    const changes = claimed.action === 'image' ? await generateImage(env, claimed, project, row.client_id) : await generateText(env, claimed, project);
+    const request = (url, options) => cancellableProviderJson(env, id, url, options);
+    const changes = claimed.action === 'image' ? await generateImage(env, claimed, project, row.client_id, request) : await generateText(env, claimed, project, request);
     for (let attempt = 0; attempt < 8; attempt++) {
+      await assertRunning(env, id);
       let current = project, merged = changes;
       if (claimed.action === 'image') {
         current = await getProject(env, claimed.account_id, row.client_id, claimed.project_id);
@@ -153,7 +192,7 @@ export async function consumeJob(env, id) {
       }
       const { id: _id, clientId: _client, revision: _revision, archived: _archived, businessPackId: _pack, businessPackVersion: _version, recipeId: _recipe, contextSnapshot: _context, createdAt: _created, updatedAt: _updated, ...persisted } = { ...current, ...merged };
       const [updated] = await env.DB.batch([
-        env.DB.prepare('UPDATE projects SET project_json=?,revision=revision+1,updated_at=? WHERE id=? AND account_id=? AND revision=?').bind(JSON.stringify(persisted), stamp(), project.id, claimed.account_id, current.revision),
+        env.DB.prepare("UPDATE projects SET project_json=?,revision=revision+1,updated_at=? WHERE id=? AND account_id=? AND revision=? AND EXISTS (SELECT 1 FROM generation_jobs WHERE id=? AND status='running')").bind(JSON.stringify(persisted), stamp(), project.id, claimed.account_id, current.revision, id),
         env.DB.prepare("INSERT INTO credit_ledger(id,account_id,amount,kind,source_id) SELECT ?,r.account_id,-r.amount,'generation',? FROM credit_reservations r WHERE r.job_id=? AND r.status='reserved' AND changes()=1 AND EXISTS (SELECT 1 FROM projects p WHERE p.id=? AND p.revision=?)").bind(crypto.randomUUID(), `job:${id}`, id, project.id, current.revision + 1),
         env.DB.prepare("UPDATE credit_reservations SET status='settled',updated_at=? WHERE job_id=? AND status='reserved' AND EXISTS (SELECT 1 FROM credit_ledger WHERE source_id=?)").bind(stamp(), id, `job:${id}`),
         env.DB.prepare("UPDATE generation_jobs SET status='succeeded',finished_at=? WHERE id=? AND status='running' AND EXISTS (SELECT 1 FROM credit_ledger WHERE source_id=?)").bind(stamp(), id, `job:${id}`)

@@ -294,13 +294,18 @@ impl Engine {
         self.message(&format!("{} · generating {}", job.provider, job.task));
         let done = AtomicBool::new(false);
         let lost = AtomicBool::new(false);
+        let job_cancel = AtomicBool::new(self.cancel.load(Ordering::SeqCst));
         let result = thread::scope(|scope| {
             scope.spawn(|| {
                 let mut ticks = 0;
                 while !done.load(Ordering::SeqCst) {
                     thread::sleep(Duration::from_millis(100));
+                    if self.cancel.load(Ordering::SeqCst) || self.shutdown.load(Ordering::SeqCst) {
+                        job_cancel.store(true, Ordering::SeqCst);
+                        break;
+                    }
                     ticks += 1;
-                    if ticks >= 150 {
+                    if ticks >= 10 {
                         ticks = 0;
                         match self.request(
                             c,
@@ -310,7 +315,7 @@ impl Engine {
                             Ok(v) if v["active"] == true => {}
                             _ => {
                                 lost.store(true, Ordering::SeqCst);
-                                self.cancel.store(true, Ordering::SeqCst);
+                                job_cancel.store(true, Ordering::SeqCst);
                                 break;
                             }
                         }
@@ -324,9 +329,9 @@ impl Engine {
                     json!({"lease":job.lease}),
                 )
                 .map_err(|e| e.message)
-                .and_then(|refs| providers::generate_image(&job, &c.paths, &refs, &self.cancel))
+                .and_then(|refs| providers::generate_image(&job, &c.paths, &refs, &job_cancel))
             } else {
-                providers::generate(&job, &c.paths, &self.cancel)
+                providers::generate(&job, &c.paths, &job_cancel)
             };
             done.store(true, Ordering::SeqCst);
             r
@@ -334,7 +339,7 @@ impl Engine {
         let body = match result {
             Ok(v) => json!({"lease":job.lease,"result":v}),
             Err(_) => {
-                json!({"lease":job.lease,"error":if self.cancel.load(Ordering::SeqCst) {"cancelled"} else {"generation_failed"}})
+                json!({"lease":job.lease,"error":if job_cancel.load(Ordering::SeqCst) {"cancelled"} else {"generation_failed"}})
             }
         };
         let mut delivered = false;
@@ -354,10 +359,7 @@ impl Engine {
             }
         }
         if lost.load(Ordering::SeqCst) {
-            self.status.lock().unwrap().running = false;
-            self.message(
-                "Connection or job lease lost. Generation stopped. Click Start to reconnect.",
-            );
+            self.message("Job stopped or lease lost. Other jobs can continue.");
         } else if delivered {
             self.message(if body.get("error").is_some() {
                 "Generation failed. Check CLI sign-in and model access."

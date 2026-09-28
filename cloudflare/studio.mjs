@@ -1,6 +1,6 @@
 import { publicBusinessPacks, getBusinessPack, resolveBusinessContext, starterSlidesForPack } from '../server/business-packs.mjs';
 import { repairGeneration } from '../web/studio-controls.js';
-import { runJob } from './generation.mjs';
+import { runJob, cancelJob } from './generation.mjs';
 import { enqueueCompanion } from './companion.mjs';
 import { templateImportRoute } from './template-import.mjs';
 import { renderStyleBoard } from './style-maker.mjs';
@@ -229,8 +229,12 @@ export async function apiRoute(request, env, viewer, url) {
       return json({ project: await getProject(env, accountId, clientId, projectId) });
     }
     if (parts[5] === 'jobs' && parts[6] && method === 'DELETE') {
-      const changed=await env.DB.prepare("UPDATE companion_jobs SET status='cancelled',error='Generation cancelled.' WHERE id=? AND account_id=? AND project_id=? AND status IN ('queued','running')").bind(parts[6],accountId,projectId).run();
-      return changed.meta.changes ? json({ok:true}) : bad('Local job is no longer active.',409);
+      const cloud = await cancelJob(env, accountId, projectId, parts[6]);
+      if (cloud) return json(cloud);
+      const local = await first(env.DB, 'SELECT id,status FROM companion_jobs WHERE id=? AND account_id=? AND project_id=?', parts[6], accountId, projectId);
+      if (!local) return bad('Job not found.',404);
+      await env.DB.prepare("UPDATE companion_jobs SET status='cancelled',error='Generation stopped.' WHERE id=? AND account_id=? AND project_id=? AND status IN ('queued','running')").bind(parts[6],accountId,projectId).run();
+      return json({ok:true});
     }
     if (parts[5] === 'jobs' && parts[6] && method === 'GET') {
       const row = await first(env.DB, 'SELECT * FROM generation_jobs WHERE account_id=? AND project_id=? AND id=?', accountId, projectId, parts[6]);

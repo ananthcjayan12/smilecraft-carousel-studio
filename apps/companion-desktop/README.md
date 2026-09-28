@@ -27,3 +27,9 @@ npm run companion:build -- --bundles nsis # Windows
 ```
 
 The Worker migrations `cloudflare/migrations/0006_companion.sql` and `cloudflare/migrations/0007_companion_images.sql` and Worker code must be deployed before local image generation. The release workflow builds Apple Silicon, Intel Mac, and Windows x64 installers on pushes to `v3` or `main`, pull requests, and manual runs; these runs upload Actions artifacts. A `companion-v<version>` tag publishes a GitHub Release after all builds pass. Update the app versions and lockfiles before a later tag. No automatic updater is configured. Signing credentials are optional; unsigned Windows builds and ad-hoc signed macOS builds may show OS warnings.
+
+### Codex image model selection
+
+For images, choose GPT-5.6 Sol, Terra, or Luna to select the Codex model directing built-in image generation, as in `v.a.1`. Sol is the first choice for new selections. “Codex default” preserves the CLI-configured model. These choices do not select the underlying image renderer.
+
+After upgrading, restart the rebuilt companion so it advertises the restored choices, and refresh the web app. The updated web/Worker code must also be running. Older companions advertise only “Codex default”; jobs for explicit models require the updated companion and never silently fall back. Existing projects retain their saved choice, so select Sol explicitly for projects previously saved with the default.

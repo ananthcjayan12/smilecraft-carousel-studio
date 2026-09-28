@@ -3,7 +3,7 @@ import { IMAGE_MODELS, WRITING_MODELS, compatibleModel } from './provider-models
 export function repairGeneration(g = {}) {
   const provider = ['openai', 'gemini', 'codex', 'antigravity'].includes(g.provider) ? g.provider : 'openai';
   const writingProvider = ['openai', 'gemini', 'claude', 'codex', 'antigravity'].includes(g.writingProvider) ? g.writingProvider : 'openai';
-  const model = provider === 'codex' ? 'imagegen' : compatibleModel(provider, g.model, 'image');
+  const model = compatibleModel(provider, g.model, 'image');
   return { ...g, provider, writingProvider, model, writingModel: ['codex', 'antigravity'].includes(writingProvider) ? String(g.writingModel || '') : compatibleModel(writingProvider, g.writingModel) };
 }
 
@@ -13,7 +13,7 @@ export function generationControls(g, status, kind, escape, agyModels = []) {
   const provider = g[providerKey], options = provider === 'antigravity' && !image && agyModels.length ? agyModels.map(m => [m.id, m.label]) : [...catalog[provider]];
   if (!options.some(([id]) => id === g[modelKey])) options.unshift([g[modelKey] || '', g[modelKey] || 'CLI default']);
   const labels = { codex: 'Codex CLI', openai: 'OpenAI API', gemini: 'Gemini API', antigravity: 'Antigravity CLI', claude: 'Claude API' };
-  return `<label class="formlabel">${image ? 'Image' : 'Writing'} provider</label><select class="control" data-generation="${providerKey}">${Object.keys(catalog).map(id => `<option value="${id}" ${id === provider ? 'selected' : ''}>${labels[id]} · ${statuses?.[id]?.available ? 'Ready' : 'Unavailable'}</option>`).join('')}</select><label class="formlabel">Model</label><select class="control" data-generation="${modelKey}">${options.map(([id, label]) => `<option value="${escape(id)}" ${id === g[modelKey] ? 'selected' : ''}>${escape(label)}</option>`).join('')}</select>${image && ['codex','antigravity'].includes(provider) ? '<p class="muted">The CLI manages its built-in image model. Choose OpenAI or Gemini API to select an image model explicitly.</p>' : ''}${provider === 'antigravity' && !image ? '<button class="btn tiny" data-action="refresh-agy">Refresh AGY models</button>' : ''}`;
+  return `<label class="formlabel">${image ? 'Image' : 'Writing'} provider</label><select class="control" data-generation="${providerKey}">${Object.keys(catalog).map(id => `<option value="${id}" ${id === provider ? 'selected' : ''}>${labels[id]} · ${statuses?.[id]?.available ? 'Ready' : 'Unavailable'}</option>`).join('')}</select><label class="formlabel">Model</label><select class="control" data-generation="${modelKey}">${options.map(([id, label]) => `<option value="${escape(id)}" ${id === g[modelKey] ? 'selected' : ''}>${escape(label)}</option>`).join('')}</select>${image && provider === 'codex' ? '<p class="muted">Choose the Codex model that directs built-in image generation.</p>' : image && provider === 'antigravity' ? '<p class="muted">The CLI manages its built-in image model. Choose OpenAI or Gemini API to select an image model explicitly.</p>' : ''}${provider === 'antigravity' && !image ? '<button class="btn tiny" data-action="refresh-agy">Refresh AGY models</button>' : ''}`;
 }
 
 export function friendlyGenerationError(error) {

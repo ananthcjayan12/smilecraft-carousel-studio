@@ -46,6 +46,20 @@ fn valid_model(id: &str) -> bool {
             .bytes()
             .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'-' | b'_' | b'.' | b'/'))
 }
+fn codex_image_models() -> Vec<Model> {
+    [
+        ("gpt-5.6-sol", "GPT-5.6 Sol"),
+        ("gpt-5.6-terra", "GPT-5.6 Terra"),
+        ("gpt-5.6-luna", "GPT-5.6 Luna"),
+        ("imagegen", "Codex default"),
+    ]
+    .into_iter()
+    .map(|(id, label)| Model {
+        id: id.into(),
+        label: label.into(),
+    })
+    .collect()
+}
 fn codex_models() -> Vec<Model> {
     let Some(home) = dirs::home_dir() else {
         return vec![];
@@ -153,10 +167,7 @@ pub fn inspect(paths: &Paths, cancel: &AtomicBool) -> Value {
                 return Err("No models available. Sign in to Antigravity.".into());
             }
             c.image_models = if provider == "codex" {
-                vec![Model {
-                    id: "imagegen".into(),
-                    label: "Codex built-in ImageGen (model managed by Codex)".into(),
-                }]
+                codex_image_models()
             } else {
                 [(
                     "gemini-3.1-flash-image",
@@ -369,13 +380,16 @@ pub fn generate_image(
         return Err("Invalid image job".into());
     }
     let allowed = if job.provider == "codex" {
-        vec!["imagegen"]
+        codex_image_models()
+            .into_iter()
+            .map(|model| model.id)
+            .collect::<Vec<_>>()
     } else if job.provider == "antigravity" {
-        vec!["gemini-3.1-flash-image"]
+        vec!["gemini-3.1-flash-image".to_string()]
     } else {
         return Err("Unsupported provider".into());
     };
-    if !allowed.contains(&job.input.model.as_str()) {
+    if !allowed.contains(&job.input.model) {
         return Err("Unsupported image model".into());
     }
     let refs = references["references"]
@@ -412,14 +426,17 @@ pub fn generate_image(
             "--skip-git-repo-check".into(),
             "--sandbox".into(),
             "workspace-write".into(),
-            "--image".into(),
         ];
+        if job.input.model != "imagegen" {
+            args.extend(["--model".into(), job.input.model.clone()]);
+        }
+        args.push("--image".into());
         args.extend(
             files
                 .iter()
                 .map(|name| dir.path().join(name).to_string_lossy().into_owned()),
         );
-        args.extend(["--".into(),format!("$imagegen\nUse built-in image generation to create exactly one finished image. Inspect the attached reference and logo images. Save the result as final-slide.png in the current working directory. Do not call an API manually or only describe the image.\n{}",job.input.prompt)]);
+        args.extend(["--".into(),format!("$imagegen\nUse built-in image generation to create exactly one finished image using HIGH image quality. Inspect the attached reference and logo images. Save the result as final-slide.png in the current working directory. Do not call an API manually or only describe the image.\n{}",job.input.prompt)]);
         (resolve("codex", &paths.codex)?, args)
     } else {
         let instruction=format!("Call the native generate_image tool to make one final image. Set ImageName exactly to final-slide.png and ImagePaths to {}. Keep the slide inside a 4:5 safe area. Save the image in the current working directory. Do not only describe it.\n{}",serde_json::to_string(&files).unwrap(),job.input.prompt);
@@ -511,35 +528,49 @@ mod tests {
         let cli = work.path().join("fake-codex");
         std::fs::write(
             &cli,
-            format!("#!/bin/sh\ncp '{}' final-slide.png\n", png.display()),
+            format!(
+                "#!/bin/sh\nprintf '%s\\n' \"$@\" > '{}'\ncp '{}' final-slide.png\n",
+                work.path().join("args.txt").display(),
+                png.display()
+            ),
         )
         .unwrap();
         std::fs::set_permissions(&cli, std::fs::Permissions::from_mode(0o700)).unwrap();
-        let job = Job {
-            id: uuid::Uuid::nil(),
-            provider: "codex".into(),
-            task: "image".into(),
-            input: Input {
-                prompt: "Create a slide".into(),
-                model: "imagegen".into(),
-            },
-            lease: "test".into(),
-            expires_at: crate::engine::now() + 30_000,
-        };
-        let refs = json!({"references":[{"mime":"image/png","data":STANDARD.encode([137,80,78,71,13,10,26,10])}]});
-        let result = generate_image(
-            &job,
-            &Paths {
-                codex: cli.to_string_lossy().into_owned(),
-                antigravity: String::new(),
-            },
-            &refs,
-            &AtomicBool::new(false),
-        )
-        .unwrap();
-        assert!(result["image"]
-            .as_str()
-            .unwrap()
-            .starts_with("data:image/png;base64,"));
+        for model in codex_image_models() {
+            let job = Job {
+                id: uuid::Uuid::nil(),
+                provider: "codex".into(),
+                task: "image".into(),
+                input: Input {
+                    prompt: "Create a slide".into(),
+                    model: model.id.clone(),
+                },
+                lease: "test".into(),
+                expires_at: crate::engine::now() + 30_000,
+            };
+            let refs = json!({"references":[{"mime":"image/png","data":STANDARD.encode([137,80,78,71,13,10,26,10])}]});
+            let result = generate_image(
+                &job,
+                &Paths {
+                    codex: cli.to_string_lossy().into_owned(),
+                    antigravity: String::new(),
+                },
+                &refs,
+                &AtomicBool::new(false),
+            )
+            .unwrap();
+            assert!(result["image"]
+                .as_str()
+                .unwrap()
+                .starts_with("data:image/png;base64,"));
+            let args = std::fs::read_to_string(work.path().join("args.txt")).unwrap();
+            let args: Vec<_> = args.lines().collect();
+            let flag = args.iter().position(|arg| *arg == "--model");
+            if model.id == "imagegen" {
+                assert!(flag.is_none());
+            } else {
+                assert_eq!(args[flag.unwrap() + 1], model.id);
+            }
+        }
     }
 }

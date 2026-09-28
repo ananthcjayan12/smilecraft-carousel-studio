@@ -319,6 +319,29 @@ mod tests {
         .unwrap_err()
         .contains("timed out"));
     }
+    #[cfg(unix)]
+    #[test]
+    fn cancellation_stops_running_process() {
+        let cancel = AtomicBool::new(false);
+        std::thread::scope(|scope| {
+            scope.spawn(|| {
+                std::thread::sleep(Duration::from_millis(100));
+                cancel.store(true, Ordering::SeqCst);
+            });
+            let started = Instant::now();
+            let result = run(
+                Path::new("/bin/sh"),
+                &["-c".into(), "sleep 30 & wait".into()],
+                "",
+                Path::new("."),
+                Duration::from_secs(10),
+                &cancel,
+                false,
+            );
+            assert!(result.unwrap_err().contains("Cancelled"));
+            assert!(started.elapsed() < Duration::from_secs(3));
+        });
+    }
     #[test]
     fn cancellation_prevents_spawn() {
         assert_eq!(
