@@ -1,3 +1,4 @@
+import { styleVariantInstructions } from '../web/style-variant.js';
 import { imageFormat, formatInstructions, openaiImageSize } from '../web/image-formats.js';
 import { businessPromptContext } from './prompt-context.mjs';
 import { compatibleModel } from '../web/provider-models.js';
@@ -262,7 +263,7 @@ export async function generateTemplateBoard(data) {
   const logo = data.logoImage ? parseDataUrl(data.logoImage, 'Business logo') : null;
   const mood = data.moodImage ? parseDataUrl(data.moodImage, 'Optional reference image') : null;
   const d = data.design || {}, brand = data.brand || {};
-  const prompt = `Act as a senior brand and editorial designer. Create one ORIGINAL 4:3 landscape design-system presentation board containing exactly five separate 4:5 social carousel templates in a single horizontal row.
+  const prompt = data.sourceTemplateId ? styleVariantInstructions(data) : `Act as a senior brand and editorial designer. Create one ORIGINAL 4:3 landscape design-system presentation board containing exactly five separate 4:5 social carousel templates in a single horizontal row.
 
 The supplied dental board is inspiration for design principles only: ${limit(d.kind, 180)}. Do not copy its dental subject matter, sample wording, people, icons, logo, or clinic identity. Reinterpret its hierarchy, rhythm, whitespace, typographic contrast, image treatment, footer logic and level of polish for this business:
 BUSINESS: ${JSON.stringify(limit(brand.name, 100))}

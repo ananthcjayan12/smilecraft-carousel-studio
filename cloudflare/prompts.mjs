@@ -1,3 +1,4 @@
+import { styleVariantInstructions } from '../web/style-variant.js';
 import { imageFormat, formatInstructions } from '../web/image-formats.js';
 // Pure prompt builders carried from v.a.1 for the hosted Worker and companion.
 // Keep wording in sync with server/codex.mjs and server/image-providers.mjs.
@@ -66,6 +67,7 @@ export function buildV1ImagePrompt(data) {
 
 
 export function buildV1StylePrompt(data) {
+  if (data.sourceTemplateId) return styleVariantInstructions(data);
   const d = data.design || {}, brand = data.brand || {};
   const prompt = `Act as a senior brand and editorial designer. Create one ORIGINAL 4:3 landscape design-system presentation board containing exactly five separate 4:5 social carousel templates in a single horizontal row.
 

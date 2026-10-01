@@ -11,7 +11,7 @@ import { generateSlideImage, generateTemplateBoard, imageProviderStatus } from '
 import { inspectCli } from './cli-tools.mjs';
 import { providerConcurrency, textConcurrency, providerActivity, withProviderSlot } from './provider-concurrency.mjs';
 import { publicBusinessPacks, getBusinessPack, resolveBusinessContext } from './business-packs.mjs';
-import { installTemplateRecords, storageRoot, listClients, getClient, createClient, updateClient, listProjects, getProject, createProject, saveProject, applyLatestClientSettings, storeAsset, getAsset, listTemplates, listSharedTemplates, getTemplate, createJob, startJob, finishJob, listJobs, dashboard, migrationReport, migrateLegacy, importPortableProject, attachArtworkIfCurrent } from './store.mjs';
+import { removeTemplate, installTemplateRecords, storageRoot, listClients, getClient, createClient, updateClient, listProjects, getProject, createProject, saveProject, applyLatestClientSettings, storeAsset, getAsset, listTemplates, listSharedTemplates, getTemplate, createJob, startJob, finishJob, listJobs, dashboard, migrationReport, migrateLegacy, importPortableProject, attachArtworkIfCurrent } from './store.mjs';
 import { stageTemplateImport, updateTemplateImport, installTemplateImport, cleanupImports } from './template-import.mjs';
 
 const root=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'..'),site=path.join(root,'web'),legacyStorage=path.join(storageRoot,'projects'),port=Number(process.env.PORT)||4178,host=process.env.HOST||'127.0.0.1';
@@ -29,7 +29,7 @@ function parseDataUrl(v){const m=/^data:(image\/(?:png|jpeg|webp));base64,([A-Za
 const codexCli=inspectCli('codex','CODEX_BIN',{authArgs:['login','status']}),antigravityCli=inspectCli('agy','AGY_BIN');if(codexCli.installed)process.env.CODEX_BIN=codexCli.binary;if(antigravityCli.installed)process.env.AGY_BIN=antigravityCli.binary;
 const legacyTemplateIds=new Set(['teal-editorial-pro','clinical-white','warm-ivory','deep-teal-premium','mint-friendly','airy-aqua','kids-mint','nature-sage','warm-clinical','premium-charcoal']);
 const hash=value=>crypto.createHash('sha256').update(typeof value==='string'?value:JSON.stringify(value)).digest('hex');
-function routeParts(pathname){return pathname.split('/').filter(Boolean)}
+function routeParts(pathname){return pathname.split('/').filter(Boolean).map(decodeURIComponent)}
 async function referenceFor(clientId,templateId,slideIndex){
   const template=getTemplate(clientId,templateId);
   if(!template || template.businessPackId && template.businessPackId!==getClient(clientId)?.businessPackId) throw Object.assign(new Error('Choose a compatible installed template before generating artwork.'),{status:400});
@@ -102,12 +102,15 @@ if(parts[0]==='api'&&parts[1]==='clients'&&parts[3]==='templates'&&parts.length=
 if(parts[0]==='api'&&parts[1]==='clients'&&parts[3]==='style-maker'&&parts[4]==='render'&&req.method==='POST'){
   const client=getClient(parts[2]);if(!client)return send(res,404,{error:'Client not found.'});
   const d=await body(req,45_000_000),designId=String(d.designId||'');if(!legacyTemplateIds.has(designId))return send(res,400,{error:'Choose one of the ten design inspirations.'});
-  const reference=await readFile(path.join(site,'assets','design-systems',`${designId}.png`));
+  const source=d.sourceTemplateId?getTemplate(client.id,d.sourceTemplateId):null;
+  if(d.sourceTemplateId&&(!source||source.clientId!==client.id||source.businessPackId!==client.businessPackId))return send(res,404,{error:'Client style not found.'});
+  const reference=source?parseDataUrl(d.referenceImage):{bytes:await readFile(path.join(site,'assets','design-systems',`${designId}.png`)),mime:'image/png'};
   const logoAsset=client.brand?.logoAssetId?getAsset(client.id,client.brand.logoAssetId):null;
   const logoImage=d.logoImage||(logoAsset?dataUrl(await readFile(logoAsset.path),logoAsset.mime):'');
-  const image=await withProviderSlot(String(d.provider||'openai'),()=>generateTemplateBoard({...d,logoImage,referenceImage:dataUrl(reference,'image/png'),workDir:storageRoot}));
+  const image=await withProviderSlot(String(d.provider||'openai'),()=>generateTemplateBoard({...d,logoImage,referenceImage:dataUrl(reference.bytes,reference.mime),workDir:storageRoot}));
   return send(res,200,{image});
 }
+if(parts[0]==='api'&&parts[1]==='clients'&&parts[3]==='templates'&&parts.length===5&&req.method==='DELETE')return send(res,200,removeTemplate(parts[2],parts[4]));
 if(parts[0]==='api'&&parts[1]==='clients'&&parts[3]==='templates'&&req.method==='GET'){const c=getClient(parts[2]);if(!c)return send(res,404,{error:'Client not found.'});return send(res,200,{templates:listTemplates(c.id,c.businessPackId)})}
 if(parts[0]==='api'&&parts[1]==='clients'&&parts[3]==='assets'&&parts.length===5&&req.method==='GET'){const a=getAsset(parts[2],parts[4]);if(!a)return send(res,404,{error:'Asset not found.'});res.writeHead(200,{'Content-Type':a.mime,'Cache-Control':'private, max-age=3600','X-Content-Type-Options':'nosniff'});return fs.createReadStream(a.path).pipe(res)}
 if(parts[0]==='api'&&parts[1]==='clients'&&parts[3]==='assets'&&parts.length===4&&req.method==='POST'){const d=await body(req,25_000_000),p=parseDataUrl(d.image);return send(res,201,{asset:await storeAsset(parts[2],{projectId:d.projectId,kind:d.kind||'upload',name:d.name||'upload',mime:p.mime,bytes:p.bytes})})}
@@ -127,7 +130,7 @@ if(u.pathname==='/api/template-pack'&&req.method==='POST'){const d=await body(re
 if(u.pathname==='/api/draft'&&req.method==='POST'){const d=await body(req,100_000);if(!String(d.topic||'').trim())return send(res,400,{error:'Enter a topic before generating copy.'});return send(res,200,{draft:await withProviderSlot(String(d.provider||'codex'),()=>runTextProvider('draft',{topic:String(d.topic).slice(0,450),notes:String(d.notes||'').slice(0,2000),clinic:{name:String(d.clinic?.name||'').slice(0,80),phone:String(d.clinic?.phone||'').slice(0,40)},provider:String(d.provider||'codex'),model:String(d.model||''),workDir:storageRoot,outputName:'carousel-draft'}),'text')})}
 if(u.pathname==='/api/revise'&&req.method==='POST'){const d=await body(req,100_000);return send(res,200,{slide:await withProviderSlot(String(d.provider||'codex'),()=>runTextProvider('revise',{topic:d.topic,slide:d.slide,correction:d.correction,clinic:d.clinic,provider:d.provider||'codex',model:d.model||'',workDir:storageRoot,outputName:'slide-revision'}),'text')})}
 if(u.pathname==='/api/render-slide'&&req.method==='POST'){const d=await body(req,35_000_000);return send(res,200,{image:await withProviderSlot(String(d.provider||'openai'),()=>generateSlideImage({...d,workDir:storageRoot}))})}
-if(u.pathname==='/api/template-maker/render'&&req.method==='POST'){const d=await body(req,45_000_000),designId=String(d.designId||'');if(!legacyTemplateIds.has(designId))return send(res,400,{error:'Choose one of the ten design inspirations.'});const reference=await readFile(path.join(site,'assets','design-systems',`${designId}.png`));const image=await withProviderSlot(String(d.provider||'openai'),()=>generateTemplateBoard({...d,referenceImage:dataUrl(reference,'image/png'),workDir:storageRoot}));return send(res,200,{image})}
+if(u.pathname==='/api/template-maker/render'&&req.method==='POST'){const d=await body(req,45_000_000),designId=String(d.designId||'');if(!legacyTemplateIds.has(designId))return send(res,400,{error:'Choose one of the ten design inspirations.'});const reference=await readFile(path.join(site,'assets','design-systems',`${designId}.png`));const image=await withProviderSlot(String(d.provider||'openai'),()=>generateTemplateBoard({...d,referenceImage:dataUrl(reference.bytes,reference.mime),workDir:storageRoot}));return send(res,200,{image})}
 
 if(req.method!=='GET'&&req.method!=='HEAD')return send(res,405,{error:'Method not allowed.'});let file=path.resolve(site,`.${decodeURIComponent(u.pathname==='/'?'/index.html':u.pathname)}`);if(!(file===site||file.startsWith(site+path.sep)))return send(res,403,{error:'Forbidden.'});if(!path.extname(file))file=path.join(file,'index.html');let st;try{st=await fs.promises.stat(file)}catch{return send(res,404,{error:'Not found.'})}if(!st.isFile())return send(res,404,{error:'Not found.'});res.writeHead(200,{'Content-Type':mime[path.extname(file)]||'application/octet-stream','X-Content-Type-Options':'nosniff'});fs.createReadStream(file).pipe(res)
 }catch(e){if(!res.headersSent)send(res,e.status||500,{error:e.message||'Unexpected error.',currentRevision:e.currentRevision})}});

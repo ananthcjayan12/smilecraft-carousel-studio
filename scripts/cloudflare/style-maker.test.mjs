@@ -37,3 +37,31 @@ test('provider failure refunds a charged style generation', async () => {
     assert.match(ledger[1].sql, /style_refund/);
   } finally { restore(); }
 });
+
+test('style variation sends clean and annotated client references without fetching dental inspiration', async () => {
+  const { env, ledger, restore } = setup(200);
+  const originalPrepare = env.DB.prepare;
+  env.DB.prepare = sql => sql.startsWith('SELECT id FROM templates') ? { bind(...values) { assert.deepEqual(values, ['account-1','client-1','salon','custom:one']); return {first:async()=>({id:'custom:one'})}; } } : originalPrepare(sql);
+  env.STATIC.fetch = async () => { throw Error('Dental inspiration should not be fetched for a variation'); };
+  globalThis.fetch = async (_url, options) => {
+    assert.equal(options.body.getAll('image[]').length, 2);
+    assert.match(options.body.get('prompt'), /Slide 3: lighten the marked background/);
+    assert.match(options.body.get('prompt'), /remove all red annotation strokes/);
+    return Response.json({data:[{b64_json:Buffer.from('variant').toString('base64')}]});
+  };
+  try {
+    const result = await renderStyleBoard(env,'account-1',{...client,businessPackId:'salon'},{...input,logoImage:'',sourceTemplateId:'custom:one',referenceImage:logo,moodImage:logo,revisionNotes:'Slide 3: lighten the marked background'});
+    assert.match(result.image,/^data:image\/png;base64,/);
+    assert.equal(ledger.length,1);
+  } finally {restore();}
+});
+
+test('a missing or another client’s source style is rejected before credits are charged', async () => {
+  const {env, ledger, restore} = setup(200);
+  const originalPrepare = env.DB.prepare;
+  env.DB.prepare = sql => sql.startsWith('SELECT id FROM templates') ? {bind(){return {first:async()=>null};}} : originalPrepare(sql);
+  try {
+    await assert.rejects(renderStyleBoard(env,'account-1',client,{...input,sourceTemplateId:'other-client-style',referenceImage:logo}), error=>error.status===404);
+    assert.equal(ledger.length,0);
+  } finally {restore();}
+});
