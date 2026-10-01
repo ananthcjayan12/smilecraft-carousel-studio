@@ -29,7 +29,7 @@ function fixture() {
 }
 
 async function project(env) {
-  const response = await apiRoute(new Request('https://test.example/api/clients/c/projects', { method: 'POST', body: JSON.stringify({ topic: 'A useful tip' }) }), env, { account_id: 'a' }, new URL('https://test.example/api/clients/c/projects'));
+  const response = await apiRoute(new Request('https://test.example/api/clients/c/projects', { method: 'POST', body: JSON.stringify({ topic: 'A useful tip', templateId: 'builtin:general:neutral:1.0.0' }) }), env, { account_id: 'a' }, new URL('https://test.example/api/clients/c/projects'));
   assert.equal(response.status, 201);
   return (await response.json()).project;
 }

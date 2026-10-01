@@ -11,7 +11,7 @@ const parse = (value, fallback = {}) => { try { return JSON.parse(value); } catc
 const json = (value, status = 200) => Response.json(value, { status, headers: { 'Cache-Control': 'no-store' } });
 const bad = (message, status = 400) => json({ error: message }, status);
 const builtin = [
-  ...['dental', 'tour', 'salon', 'construction', 'general'].map(id => ({ id: `builtin:${id}:neutral:1.0.0`, clientId: null, name: 'Modern Teal', businessPackId: id, mode: 'slides', data: { slides: Array.from({ length: 5 }, (_, i) => ({ position: i + 1, staticPath: '/assets/teal-editorial.jpg' })) } })),
+  ...['dental', 'tour', 'salon', 'construction', 'general'].map(id => ({ id: `builtin:${id}:neutral:1.0.0`, clientId: null, name: 'Modern Teal', businessPackId: id, mode: 'slides', data: { slides: Array.from({ length: 5 }, (_, i) => ({ position: i + 1, staticPath: id === 'dental' ? '/assets/teal-editorial.jpg' : '/assets/neutral-starter.png' })) } })),
   ...[['friendly', 'Friendly Clinic', 'friendly-clinic.jpg'], ['clean', 'Clinical Clean', 'clinical-clean.jpg'], ['premium', 'Premium Dark', 'premium-dark.jpg']].map(([id, name, file]) => ({ id: `builtin:dental:${id}:1.0.0`, clientId: null, name, businessPackId: 'dental', mode: 'slides', data: { slides: Array.from({ length: 5 }, (_, i) => ({ position: i + 1, staticPath: `/assets/${file}` })) } })),
   ...[['teal-editorial-pro', .205, .744], ['clinical-white', .205, .752], ['warm-ivory', .064, .811], ['deep-teal-premium', .181, .848], ['mint-friendly', .158, .864], ['airy-aqua', .160, .824], ['kids-mint', .177, .866], ['nature-sage', .172, .826], ['warm-clinical', .205, .915], ['premium-charcoal', .163, .736]].map(([id, top, bottom]) => ({ id: `builtin:dental:legacy:${id}:1.0.0`, clientId: null, name: id.replaceAll('-', ' '), businessPackId: 'dental', mode: 'board', data: { staticPath: `/assets/design-systems/${id}.png`, cropPaths: Array.from({ length: 5 }, (_, i) => `/assets/design-systems/crops/${id}-${i + 1}.jpg`), crops: Array.from({ length: 5 }, (_, i) => ({ position: i + 1, top, bottom, left: .006, right: .006, gap: .005 })) } }))
 ];
@@ -57,7 +57,7 @@ export function decodeImage(data) {
   return { mime: match[1], bytes: Uint8Array.from(binary, char => char.charCodeAt(0)) };
 }
 export async function apiRoute(request, env, viewer, url) {
-  const accountId = viewer.account_id, parts = url.pathname.split('/').filter(Boolean), method = request.method;
+  const accountId = viewer.account_id, parts = url.pathname.split('/').filter(Boolean).map(decodeURIComponent), method = request.method;
   const body = async () => { const data = await request.json(); if (!data || typeof data !== 'object' || Array.isArray(data)) throw Object.assign(new Error('Expected a JSON object.'), { status: 400 }); return data; };
   if (url.pathname === '/api/me' && method === 'GET') {
     const subscription = await first(env.DB, 'SELECT plan_id AS planId,period_start AS periodStart FROM subscriptions WHERE account_id=?', accountId);
@@ -140,13 +140,17 @@ export async function apiRoute(request, env, viewer, url) {
   if (parts[3] === 'projects' && parts.length === 4 && method === 'GET') return json({ projects: (await all(env.DB, 'SELECT * FROM projects WHERE account_id=? AND client_id=? AND archived=0 ORDER BY updated_at DESC', accountId, clientId)).map(projectView) });
   if (parts[3] === 'projects' && parts.length === 4 && method === 'POST') {
     const input = await body(), pack = getBusinessPack(client.businessPackId), context = resolveBusinessContext(client, input.contextOverrides || {}), id = crypto.randomUUID(), stamp = now();
-    const project = { schemaVersion: 1, topic: String(input.topic || '').slice(0, 450), key: String(input.key || '').slice(0, 80), notes: String(input.notes || '').slice(0, 4000), language: String(input.language || context.language).slice(0, 80), templateId: String(input.templateId || `builtin:${pack.id}:neutral:1.0.0`), templateVersion: '', slides: Array.isArray(input.slides) && input.slides.length === 5 ? input.slides : starterSlidesForPack(pack.id), instagram: String(input.instagram || ''), facebook: String(input.facebook || ''), youtubeTitle: '', youtubeDescription: '', generation: repairGeneration(input.generation), stage: Number(input.stage) || 0, exportHistory: [] };
+    const project = { schemaVersion: 1, topic: String(input.topic || '').slice(0, 450), key: String(input.key || '').slice(0, 80), notes: String(input.notes || '').slice(0, 4000), language: String(input.language || context.language).slice(0, 80), templateId: String(input.templateId || ''), templateVersion: '', slides: Array.isArray(input.slides) && input.slides.length === 5 ? input.slides : starterSlidesForPack(pack.id), instagram: String(input.instagram || ''), facebook: String(input.facebook || ''), youtubeTitle: '', youtubeDescription: '', generation: repairGeneration(input.generation), stage: Number(input.stage) || 0, exportHistory: [] };
     await env.DB.prepare('INSERT INTO projects(id,account_id,client_id,business_pack_id,business_pack_version,recipe_id,context_json,project_json,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?)').bind(id, accountId, clientId, pack.id, pack.version, context.recipe.id, JSON.stringify(context), JSON.stringify(project), stamp, stamp).run();
     return json({ project: await getProject(env, accountId, clientId, id) }, 201);
   }
   if (parts[3] === 'templates' && parts.length === 4 && method === 'GET') {
     const custom = (await all(env.DB, 'SELECT * FROM templates WHERE account_id=? AND client_id=? AND business_pack_id=? ORDER BY created_at DESC', accountId, clientId, client.businessPackId)).map(row => ({ id: row.id, clientId, name: row.name, businessPackId: row.business_pack_id, mode: row.mode, data: parse(row.data_json) }));
-    return json({ templates: [...custom, ...builtin.filter(item => item.businessPackId === client.businessPackId)] });
+    return json({ templates: custom });
+  }
+  if (parts[3] === 'templates' && parts.length === 5 && method === 'DELETE') {
+    const result = await env.DB.prepare('DELETE FROM templates WHERE account_id=? AND client_id=? AND id=?').bind(accountId, clientId, parts[4]).run();
+    return result.meta.changes ? json({ removed: true }) : bad('Client style not found.', 404);
   }
   if (parts[3] === 'templates' && parts.length === 4 && method === 'POST') {
     const input = await body();
@@ -175,7 +179,7 @@ export async function apiRoute(request, env, viewer, url) {
     for (const value of [...Object.values(embedded.artworks || {}), ...(embedded.template?.images || []), ...(embedded.logo ? [embedded.logo] : [])]) decodeImage(value);
     const pack = getBusinessPack(client.businessPackId), context = resolveBusinessContext(client), id = crypto.randomUUID(), stamp = now();
     const slides = source.slides.map((slide, i) => ({ ...slide, id: `slide-${i + 1}`, artworkAssetId: '', artworkReviewed: false, artworkReviewedAt: '' }));
-    const project = { schemaVersion: 1, topic: String(source.topic || '').slice(0, 450), key: String(source.key || '').slice(0, 80), notes: String(source.notes || '').slice(0, 4000), language: String(source.language || context.language).slice(0, 80), templateId: `builtin:${pack.id}:neutral:1.0.0`, templateVersion: '', slides, instagram: String(source.instagram || ''), facebook: String(source.facebook || ''), youtubeTitle: String(source.youtubeTitle || ''), youtubeDescription: String(source.youtubeDescription || ''), generation: repairGeneration(source.generation), stage: Number(source.stage) || 0, exportHistory: [] };
+    const project = { schemaVersion: 1, topic: String(source.topic || '').slice(0, 450), key: String(source.key || '').slice(0, 80), notes: String(source.notes || '').slice(0, 4000), language: String(source.language || context.language).slice(0, 80), templateId: '', templateVersion: '', slides, instagram: String(source.instagram || ''), facebook: String(source.facebook || ''), youtubeTitle: String(source.youtubeTitle || ''), youtubeDescription: String(source.youtubeDescription || ''), generation: repairGeneration(source.generation), stage: Number(source.stage) || 0, exportHistory: [] };
     await env.DB.prepare('INSERT INTO projects(id,account_id,client_id,business_pack_id,business_pack_version,recipe_id,context_json,project_json,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?)').bind(id, accountId, clientId, pack.id, pack.version, context.recipe.id, JSON.stringify(context), JSON.stringify(project), stamp, stamp).run();
     for (let i = 0; i < 5; i++) if (embedded.artworks?.[`slide-${i + 1}`]) {
       const image = decodeImage(embedded.artworks[`slide-${i + 1}`]);

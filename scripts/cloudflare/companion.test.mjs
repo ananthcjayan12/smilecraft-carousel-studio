@@ -178,7 +178,7 @@ test('companion receives selected format and cannot attach artwork after a forma
   const device = await (await route(env, null, '/pair', 'POST', { code: pair.code, name: 'Laptop' })).json();
   await route(env, null, '/poll', 'POST', caps, device.token);
   const url = new URL('https://test.example/api/clients/c/projects');
-  const project = (await (await apiRoute(new Request(url, { method: 'POST', body: JSON.stringify({ topic: 'Story', generation: { aspectRatio: '9:16' } }) }), env, viewer, url)).json()).project;
+  const project = (await (await apiRoute(new Request(url, { method: 'POST', body: JSON.stringify({ topic: 'Story', templateId: 'builtin:dental:neutral:1.0.0', generation: { aspectRatio: '9:16' } }) }), env, viewer, url)).json()).project;
   const data = JSON.parse(sqlite.prepare('SELECT project_json FROM projects WHERE id=?').get(project.id).project_json);
   data.slides[0].approved = true;
   sqlite.prepare('UPDATE projects SET project_json=? WHERE id=?').run(JSON.stringify(data), project.id);

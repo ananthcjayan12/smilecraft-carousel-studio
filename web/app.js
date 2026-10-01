@@ -1,3 +1,4 @@
+import { attachStyleMarker, styleReferenceImage, appendMarkNote } from './style-variant.js';
 import { IMAGE_FORMATS, imageFormat } from './image-formats.js';
 import { finalArtworkBlob } from './canvas.js';
 import { starterSlides } from "./data.js";
@@ -47,6 +48,8 @@ let S = {
   tab: "overview",
   form: false,
   makerOpen: false,
+  variant: null,
+  removeStyleId: "",
   import: null,
   importId: "",
   regenerationNotes: {},
@@ -138,6 +141,8 @@ async function client(id) {
     logoColors: null,
     maker: { ...S.maker, name: a.client.brand?.name || a.client.name, businessType: pk(a.client.businessPackId).name || '', primary: a.client.brand?.primary || '#073a42', accent: a.client.brand?.accent || '#14ada9', provider: S.status.imageProviders?.[S.maker.provider]?.available ? S.maker.provider : Object.keys(S.status.imageProviders || {}).find(id => S.status.imageProviders[id].available) || S.maker.provider, logoImage: '', logoName: '', moodImage: '', moodName: '', progress: 0, total: 0 },
     makerOpen: false,
+    variant: null,
+    removeStyleId: "",
   });
   if (!IMAGE_MODELS[S.maker.provider]?.some(([id]) => id === S.maker.model)) S.maker.model = IMAGE_MODELS[S.maker.provider]?.[0]?.[0] || '';
   render();
@@ -232,12 +237,47 @@ const img = (t) => {
 };
 function styles(ts, editable = false) {
   const upload = editable ? `<div class="row" style="gap:12px;flex-wrap:wrap"><label class="btn upload">Upload one reference image<input type="file" data-file="style-image" accept="image/png,image/jpeg,image/webp"></label><label class="btn upload">Import five-slide design ZIP<input type="file" data-file="design-package" accept=".zip,application/zip"></label></div>${S.import ? `<div class="card form"><h3>Package preview</h3><p>${E(S.import.kind)} · ${S.import.images?.length || 0} images</p>${S.import.unresolved ? `<p>Choose five images to map before installing.</p><button class="btn" data-a="confirm-design">Use first five images</button>` : `<p>${(S.import.manifest?.templates || S.import.templates || []).map(t => E(t.name)).join(', ')}</p><button class="btn primary" data-a="install-design">Install styles</button>`}</div>` : ''}` : '';
-  return `<section class="card style-library"><div class="style-head"><div><span class="eyebrow">VISUAL LIBRARY</span><h2>${editable ? 'Styles for this client' : 'Explore shared styles'}</h2><p class="muted">Use a consistent visual direction across all five slides.</p></div></div>${upload}<div class="styles">${ts.map((t) => `<div>${img(t) ? `<img src="${img(t)}" alt="${E(t.name)} reference">` : "✦"}<b>${E(t.name)}</b><small>${t.clientId === null ? "Shared" : "Private"} style</small></div>`).join("") || '<div class="empty">No styles installed yet.</div>'}</div></section>${editable ? `<details class="card maker-disclosure" ${S.makerOpen ? 'open' : ''}><summary data-a="maker-toggle"><span><span class="eyebrow">CUSTOM DESIGN</span><strong>Create a new style from your brand</strong><small>Use a logo and a creative direction to generate five reusable references.</small></span><b aria-hidden="true">＋</b></summary>${styleMaker()}</details>` : ''}`;
+  return `<section class="card style-library"><div class="style-head"><div><span class="eyebrow">VISUAL LIBRARY</span><h2>${editable ? 'Styles for this client' : 'Explore design references'}</h2><p class="muted">Use a consistent visual direction across all five slides.</p></div></div>${upload}<div class="styles">${ts.map((t) => `<div>${img(t) ? `<img src="${img(t)}" alt="${E(t.name)} reference">` : "✦"}<b>${E(t.name)}</b><small>${t.id.startsWith("builtin:") ? "Inspiration only" : t.clientId === null ? "Shared style" : "Private style"}</small>${editable && t.clientId === S.client.id ? `<div class="style-actions"><button class="btn" data-a="style-variant" data-id="${E(t.id)}" ${S.busy ? 'disabled' : ''}>Mark & create variation</button><button class="btn" data-a="style-remove" data-id="${E(t.id)}" ${S.busy ? 'disabled' : ''}>Remove</button></div>${S.removeStyleId === t.id ? `<div class="style-remove-confirm"><p>Remove this style from the client library? Existing artwork is kept. Projects using it will need another style for new generation.</p><button class="btn" data-a="style-remove-cancel">Cancel</button><button class="btn primary" data-a="style-remove-confirm" data-id="${E(t.id)}">Remove style</button></div>` : ''}` : ''}</div>`).join("") || '<div class="empty">No styles installed yet.</div>'}</div></section>${editable ? styleVariantEditor() : ''}${editable ? `<details class="card maker-disclosure" ${S.makerOpen ? 'open' : ''}><summary data-a="maker-toggle"><span><span class="eyebrow">CUSTOM DESIGN</span><strong>Create a new style from your brand</strong><small>Use a logo and a creative direction to generate five reusable references.</small></span><b aria-hidden="true">＋</b></summary>${styleMaker()}</details>` : ''}`;
+}
+function styleVariantEditor() {
+  const v = S.variant;
+  if (!v) return '';
+  const available = Object.entries(S.status.imageProviders || {}).filter(([, x]) => x.available);
+  return `<section class="card form style-variant-editor"><div class="row"><div><span class="eyebrow">STYLE VARIATION</span><h2>${E(v.source.name)}</h2></div><button class="btn" data-a="variant-close" ${S.busy ? 'disabled' : ''}>Close</button></div><p class="muted">Draw on the full image. Each mark gets a number and a matching line below where you can describe the change. The result is saved as a new style.</p><div class="variant-preview"><canvas id="style-marker" width="${v.image.naturalWidth}" height="${v.image.naturalHeight}" aria-label="Mark areas to change on the full design"></canvas></div><div class="row"><button class="btn" data-a="variant-undo" ${S.busy ? 'disabled' : ''}>Undo mark</button><button class="btn" data-a="variant-clear" ${S.busy ? 'disabled' : ''}>Clear marks</button></div><label>What changes would you like?<textarea class="control" data-variant="direction" placeholder="Describe the changes you want, including any areas you marked">${E(v.direction)}</textarea></label><label>New style name<input class="control" data-variant="name" value="${E(v.name)}"></label><div class="two"><label>Image provider<select class="control" data-maker="provider">${available.map(([id, x]) => `<option value="${E(id)}" ${S.maker.provider === id ? 'selected' : ''}>${E(x.label || id)}</option>`).join('')}</select></label><label>Image model<select class="control" data-maker="model">${(IMAGE_MODELS[S.maker.provider] || []).map(([id, label]) => `<option value="${E(id)}" ${S.maker.model === id ? 'selected' : ''}>${E(label)}</option>`).join('')}</select></label></div><p class="muted">Creating a variation costs 10 credits in the cloud.</p><button class="btn primary" data-a="variant-generate" ${S.busy || !available.length ? 'disabled' : ''}>${S.busy === 'variant' ? 'Creating variation…' : 'Create new style from these changes'}</button></section>`;
+}
+async function openStyleVariant(id) {
+  const source = S.templates.find(t => t.id === id && t.clientId === S.client.id);
+  if (!source) throw Error('Client style not found.');
+  S.busy = 'variant-loading'; render();
+  try {
+    const url = img(source);
+    if (!url) throw Error('This style has no reference image.');
+    const response = await fetch(url);
+    if (!response.ok) throw Error('Could not load the style reference.');
+    const referenceImage = await fileDataUrl(await response.blob());
+    const image = new Image(); image.src = referenceImage; await image.decode();
+    S.variant = { source, image, referenceImage, strokes: [], nextMarkNumber: 1, direction: '', name: `${source.name} — variation` };
+  } finally { S.busy = ''; render(); }
+  root.querySelector('.style-variant-editor')?.scrollIntoView({behavior:'smooth', block:'start'});
+}
+async function generateStyleVariant() {
+  const v = S.variant, m = S.maker, clientId = S.client.id;
+  if (!v.name.trim()) throw Error('Add a name for the new style.');
+  if (!v.direction.replace(/^Mark \d+:\s*$/gm, '').trim()) throw Error('Describe the changes you want next to the mark numbers.');
+  const revisionNotes = v.direction.trim();
+  S.busy = 'variant'; render();
+  try {
+    const result = await api(`/api/clients/${clientId}/style-maker/render`, { sourceTemplateId: v.source.id, designId: DESIGN_SYSTEMS[0].id, referenceImage: v.referenceImage, moodImage: v.strokes.length ? styleReferenceImage(v.image, v.strokes) : '', revisionNotes, name: m.name, businessType: m.businessType, brand: {name:m.name, primary:m.primary, accent:m.accent}, primary:m.primary, accent:m.accent, language:m.language, languageNotes:m.languageNotes, logoImage:m.logoImage, provider:m.provider, model:m.model });
+    await api(`/api/clients/${clientId}/templates`, {name:v.name.trim(), image:result.image});
+    S.templates = (await api(`/api/clients/${clientId}/templates`)).templates;
+    S.me = await api('/api/me'); S.variant = null;
+    toast('New style added to this client.');
+  } finally { S.busy = ''; render(); }
 }
 function styleMaker() {
   const m = S.maker, available = Object.entries(S.status.imageProviders || {}).filter(([, value]) => value.available);
   const hasLogo = Boolean(m.logoImage || S.client.brand?.logoAssetId);
-  return `<section class="card form style-maker"><h2>Design details</h2><p class="muted">Add your exact logo and creative direction. Each design direction creates five reusable slide references for this client.</p><div class="two"><label>Business name<input class="control" data-maker="name" value="${E(m.name)}"></label><label>Industry / business type<input class="control" data-maker="businessType" value="${E(m.businessType)}"></label></div><div class="two"><label>Primary colour<input type="color" data-maker="primary" value="${E(m.primary)}"></label><label>Accent colour<input type="color" data-maker="accent" value="${E(m.accent)}"></label></div><div class="two"><label>Exact logo <small>${S.client.brand?.logoAssetId ? 'Brand kit logo ready' : 'Required'}</small><span class="maker-upload"><input type="file" data-file="maker-logo" accept="image/png,image/jpeg,image/webp">${E(m.logoName || (S.client.brand?.logoAssetId ? 'Use brand kit logo or replace it' : 'Choose a logo'))}</span></label><label>Visual mood reference <small>Optional</small><span class="maker-upload"><input type="file" data-file="maker-mood" accept="image/png,image/jpeg,image/webp">${E(m.moodName || 'Choose an image')}</span></label></div><div class="two"><label>Language style<select class="control" data-maker="language">${['English','Malayalam + English','Hindi + English','Arabic + English','Custom mix'].map(x => `<option ${m.language === x ? 'selected' : ''}>${E(x)}</option>`).join('')}</select></label><label>Language notes<input class="control" data-maker="languageNotes" value="${E(m.languageNotes)}" placeholder="e.g. Malayalam headlines, English details"></label></div><label>Creative direction<textarea class="control" data-maker="direction" placeholder="Audience, mood, photography and things to avoid">${E(m.direction)}</textarea></label><h3>Choose a design direction</h3><div class="maker-directions">${DESIGN_SYSTEMS.map(d => `<button type="button" class="maker-direction ${m.designId === d.id ? 'sel' : ''}" data-a="maker-design" data-v="${d.id}"><img src="${E(d.img)}" alt=""><b>${E(d.name)}</b><small>${E(d.kind)}</small></button>`).join('')}</div><div class="two"><label>Image provider<select class="control" data-maker="provider">${available.map(([id, value]) => `<option value="${E(id)}" ${m.provider === id ? 'selected' : ''}>${E(value.label || id)}</option>`).join('')}</select></label><label>Image model<select class="control" data-maker="model">${(IMAGE_MODELS[m.provider] || []).map(([id, label]) => `<option value="${E(id)}" ${m.model === id ? 'selected' : ''}>${E(label)}</option>`).join('')}</select></label></div><p class="muted">Each generated direction costs 10 credits in the cloud. Review generated text and logo before publishing.</p>${S.busy === 'maker' ? `<p role="status">Creating style ${m.progress + 1} of ${m.total}…</p>` : ''}<div class="row" style="gap:10px;flex-wrap:wrap"><button class="btn primary" data-a="maker-generate" ${S.busy || !hasLogo || !available.length ? 'disabled' : ''}>Create selected style</button><button class="btn" data-a="maker-all" ${S.busy || !hasLogo || !available.length ? 'disabled' : ''}>Create all 10 styles</button></div></section>`;
+  return `<section class="card form style-maker"><h2>Design details</h2><p class="muted">Add your exact logo and creative direction. Each design direction creates five reusable slide references for this client.</p><div class="two"><label>Business name<input class="control" data-maker="name" value="${E(m.name)}"></label><label>Industry / business type<input class="control" data-maker="businessType" value="${E(m.businessType)}"></label></div><div class="two"><label>Primary colour<input type="color" data-maker="primary" value="${E(m.primary)}"></label><label>Accent colour<input type="color" data-maker="accent" value="${E(m.accent)}"></label></div><div class="two"><label>Exact logo <small>${S.client.brand?.logoAssetId ? 'Brand kit logo ready' : 'Required'}</small><span class="maker-upload"><input type="file" data-file="maker-logo" accept="image/png,image/jpeg,image/webp">${E(m.logoName || (S.client.brand?.logoAssetId ? 'Use brand kit logo or replace it' : 'Choose a logo'))}</span></label><label>Visual mood reference <small>Optional</small><span class="maker-upload"><input type="file" data-file="maker-mood" accept="image/png,image/jpeg,image/webp">${E(m.moodName || 'Choose an image')}</span></label></div><div class="two"><label>Language style<select class="control" data-maker="language">${['English','Malayalam + English','Hindi + English','Arabic + English','Custom mix'].map(x => `<option ${m.language === x ? 'selected' : ''}>${E(x)}</option>`).join('')}</select></label><label>Language notes<input class="control" data-maker="languageNotes" value="${E(m.languageNotes)}" placeholder="e.g. Malayalam headlines, English details"></label></div><label>Creative direction<textarea class="control" data-maker="direction" placeholder="Audience, mood, photography and things to avoid">${E(m.direction)}</textarea></label><h3>Choose a design direction</h3><p class="muted">These sample dental boards are inspiration only. Generated styles use this client’s business, logo and colours.</p><div class="maker-directions">${DESIGN_SYSTEMS.map(d => `<button type="button" class="maker-direction ${m.designId === d.id ? 'sel' : ''}" data-a="maker-design" data-v="${d.id}"><img src="${E(d.img)}" alt=""><b>${E(d.name)}</b><small>${E(d.kind)}</small></button>`).join('')}</div><div class="two"><label>Image provider<select class="control" data-maker="provider">${available.map(([id, value]) => `<option value="${E(id)}" ${m.provider === id ? 'selected' : ''}>${E(value.label || id)}</option>`).join('')}</select></label><label>Image model<select class="control" data-maker="model">${(IMAGE_MODELS[m.provider] || []).map(([id, label]) => `<option value="${E(id)}" ${m.model === id ? 'selected' : ''}>${E(label)}</option>`).join('')}</select></label></div><p class="muted">Each generated direction costs 10 credits in the cloud. Review generated text and logo before publishing.</p>${S.busy === 'maker' ? `<p role="status">Creating style ${m.progress + 1} of ${m.total}…</p>` : ''}<div class="row" style="gap:10px;flex-wrap:wrap"><button class="btn primary" data-a="maker-generate" ${S.busy || !hasLogo || !available.length ? 'disabled' : ''}>Create selected style</button><button class="btn" data-a="maker-all" ${S.busy || !hasLogo || !available.length ? 'disabled' : ''}>Create all 10 styles</button></div></section>`;
 }
 async function cropStyleBoard(dataUrl, crop) {
   const board = new Image();
@@ -273,7 +313,7 @@ async function generateStyles(designs) {
   } finally { S.busy = ''; render(); }
 }
 function library() {
-  return `<div class="intro"><span>LIBRARY</span><h1>Styles and creative references.</h1><p>Shared styles are available to compatible client types.</p></div>${styles(S.shared)}`;
+  return `<div class="intro"><span>LIBRARY</span><h1>Styles and creative references.</h1><p>Built-in examples are inspiration for creating new designs. Create or import each client’s own styles inside their workspace.</p></div>${styles(S.shared)}`;
 }
 function settings() {
   const companion = S.me?.companionEnabled ? `<section class="card form"><h2>AI on your computer</h2><p><a href="https://github.com/ananthcjayan12/smilecraft-carousel-studio/releases/latest" target="_blank" rel="noopener noreferrer">Download Smilecraft Companion</a></p><p>Use your signed-in Codex or Antigravity CLI for carousel writing and slide images. Keep Smilecraft Companion running while generating. Local generation uses your CLI subscription and costs 0 Smilecraft credits.</p><button class="btn" data-a="pair-code">Create pairing code</button>${S.pairing ? `<p>One-time code (expires in 5 minutes): <code>${E(S.pairing.code)}</code></p>` : ''}<p class="muted">In the companion, enter this website URL and the code above. Then select the local provider in a carousel.</p>${S.companionDevices.map(d=>`<div class="row" style="margin:12px 0;gap:12px;align-items:center"><span><b>${E(d.name)}</b><small style="display:block">${d.online?'Online':'Offline'} · Codex ${d.capabilities?.codex?.ready?'ready':'unavailable'} · Antigravity ${d.capabilities?.antigravity?.ready?'ready':'unavailable'}</small></span><button class="btn" data-a="revoke-device" data-id="${E(d.id)}">Revoke</button></div>`).join('')}</section>` : '';
@@ -298,6 +338,18 @@ function render() {
                   ? settings()
                   : studio();
   shell(content);
+  const marker = root.querySelector('#style-marker');
+  if (marker && S.variant) {
+    const variant = S.variant;
+    attachStyleMarker(marker, variant.image, variant.strokes, Boolean(S.busy), {
+      getMarkNumber: () => variant.nextMarkNumber++,
+      onMark: number => {
+        variant.direction = appendMarkNote(variant.direction, number);
+        const notes = root.querySelector('[data-variant="direction"]');
+        if (notes) { notes.value = variant.direction; notes.scrollTop = notes.scrollHeight; }
+      },
+    });
+  }
 }
 function studio() {
   let p = S.p;
@@ -554,6 +606,7 @@ async function waitForJob(id, refreshProject = true) {
 async function act(n) {
   try {
     let a = n.dataset.a;
+    if (['maker','variant','variant-loading','style-removing'].includes(S.busy)) return;
     if (a === 'maker-toggle') { S.makerOpen = !S.makerOpen; n.parentElement.open = S.makerOpen; return; }
     if (a === 'stop-generation' && S.generationRun) {
       const stopping = S.generationRun.stop();
@@ -620,6 +673,21 @@ async function act(n) {
       S.tab = n.dataset.v;
       return render();
     }
+    if (a === 'style-remove') { S.removeStyleId = n.dataset.id; return render(); }
+    if (a === 'style-remove-cancel') { S.removeStyleId = ''; return render(); }
+    if (a === 'style-remove-confirm') {
+      S.busy = 'style-removing'; render();
+      try { await api(`/api/clients/${S.client.id}/templates/${encodeURIComponent(n.dataset.id)}`, undefined, 'DELETE'); }
+      finally { S.busy = ''; }
+      if (S.variant?.source.id === n.dataset.id) S.variant = null;
+      S.removeStyleId = ''; S.templates = (await api(`/api/clients/${S.client.id}/templates`)).templates;
+      toast('Style removed.'); return render();
+    }
+    if (a === 'style-variant') return await openStyleVariant(n.dataset.id);
+    if (a === 'variant-close') { S.variant = null; return render(); }
+    if (a === 'variant-undo') { S.variant.strokes.pop(); return render(); }
+    if (a === 'variant-clear') { S.variant.strokes = []; return render(); }
+    if (a === 'variant-generate') return await generateStyleVariant();
     if (a === 'maker-design') { S.maker.designId = n.dataset.v; return render(); }
     if (a === 'maker-generate' || a === 'maker-all') return generateStyles(a === 'maker-all' ? DESIGN_SYSTEMS : DESIGN_SYSTEMS.filter(d => d.id === S.maker.designId));
     if (a === "confirm-design") {
@@ -850,6 +918,7 @@ async function act(n) {
     if (a === 'export-portable') return await exportPortable();
   } catch (e) {
     toast(e.message);
+    if (S.busy === '') render();
   }
 }
 root.onclick = (e) => {
@@ -860,6 +929,10 @@ root.onclick = (e) => {
   }
 };
 root.oninput = (e) => {
+  if (e.target.dataset.variant && S.variant) {
+    S.variant[e.target.dataset.variant] = e.target.value;
+    return;
+  }
   let x = e.target;
   if (x.dataset.maker && x.dataset.maker !== 'provider') S.maker[x.dataset.maker] = x.value;
   if (x.dataset.regenerationNote !== undefined) {
@@ -891,6 +964,9 @@ root.oninput = (e) => {
 };
 root.onchange = async (e) => {
   const x = e.target;
+  if (x.dataset.variant && S.variant) {
+    S.variant[x.dataset.variant] = x.value;
+  }
   try {
     if (x.dataset.maker === 'provider') {
       S.maker.provider = x.value;
