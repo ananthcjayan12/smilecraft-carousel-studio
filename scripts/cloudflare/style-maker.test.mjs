@@ -45,8 +45,8 @@ test('style variation sends clean and annotated client references without fetchi
   env.STATIC.fetch = async () => { throw Error('Dental inspiration should not be fetched for a variation'); };
   globalThis.fetch = async (_url, options) => {
     assert.equal(options.body.getAll('image[]').length, 2);
-    assert.equal(options.body.get('size'), '1024x1024');
-    assert.match(options.body.get('prompt'), /Required output aspect ratio: 1:1/);
+    assert.equal(options.body.get('size'), '1536x1024');
+    assert.doesNotMatch(options.body.get('prompt'), /Required output aspect ratio|Target canvas/);
     assert.match(options.body.get('prompt'), /Slide 3: lighten the marked background/);
     assert.match(options.body.get('prompt'), /remove all red annotation strokes/);
     return Response.json({data:[{b64_json:Buffer.from('variant').toString('base64')}]});

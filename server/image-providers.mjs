@@ -275,9 +275,9 @@ DESIGN DIRECTION: ${JSON.stringify(limit(data.direction, 500))}
 Use the exact supplied logo consistently and tastefully when present. If an optional mood/reference image is supplied, interpret its mood and art direction without copying protected branding. Make the five panels a reusable system: 1) bold hook, 2) educational/explanatory, 3) benefit or proof, 4) process/details, 5) clear CTA/contact layout. Use short neutral placeholder labels such as “Headline”, “Key message”, and “Call to action” only; do not invent prices, facts, phone numbers, addresses, testimonials, or claims. The result must feel native to the stated industry and visibly different from a dental clinic.
 
 Keep all five cards fully visible, evenly separated, straight-on, and easy to crop. No mockups, hands, devices, perspective, watermark, or extra panels. This is a professional design-system board, not a finished campaign.`;
-  if (data.provider === 'openai') return openaiImage(prompt, reference, logo, data.model, mood, data.sourceTemplateId ? 'slide' : 'board', data.aspectRatio);
-  if (data.provider === 'gemini') return geminiImage(prompt, reference, logo, data.model, mood, data.sourceTemplateId ? 'slide' : 'board', data.aspectRatio);
-  if (data.provider === 'codex') return codexImage(prompt, reference, logo, data.model, mood, data.sourceTemplateId ? 'slide' : 'board', data.aspectRatio);
-  if (data.provider === 'antigravity') return antigravityImage(prompt, reference, logo, data.model, mood, data.sourceTemplateId ? 'slide' : 'board', data.aspectRatio);
+  if (data.provider === 'openai') return openaiImage(prompt, reference, logo, data.model, mood, 'board');
+  if (data.provider === 'gemini') return geminiImage(prompt, reference, logo, data.model, mood, 'board');
+  if (data.provider === 'codex') return codexImage(prompt, reference, logo, data.model, mood, 'board');
+  if (data.provider === 'antigravity') return antigravityImage(prompt, reference, logo, data.model, mood, 'board');
   throw Object.assign(new Error('Choose a supported image provider.'), { status: 400 });
 }

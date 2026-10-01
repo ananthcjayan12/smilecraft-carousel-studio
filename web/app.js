@@ -261,14 +261,11 @@ async function renderClientStyle(clientId, input) {
   }
   throw Error('Companion generation timed out. Check that the companion is running.');
 }
-async function fitStyleImage(data, ratio) {
-  return fileDataUrl(await finalArtworkBlob(data,ratio));
-}
 function styleVariantEditor() {
   const v = S.variant;
   if (!v) return '';
   const available = styleProviders(S.status, S.me?.companionEnabled, S.companionDevices);
-  return `<section class="card form style-variant-editor"><div class="row"><div><span class="eyebrow">STYLE VARIATION</span><h2>${E(v.source.name)}</h2></div><button class="btn" data-a="variant-close" ${S.busy ? 'disabled' : ''}>Close</button></div><p class="muted">Draw on the full image. Each mark gets a number and a matching line below where you can describe the change. The result is saved as a new style.</p><div class="variant-preview"><canvas id="style-marker" width="${v.image.naturalWidth}" height="${v.image.naturalHeight}" aria-label="Mark areas to change on the full design"></canvas></div><div class="row"><button class="btn" data-a="variant-undo" ${S.busy ? 'disabled' : ''}>Undo mark</button><button class="btn" data-a="variant-clear" ${S.busy ? 'disabled' : ''}>Clear marks</button></div><label>What changes would you like?<textarea class="control" data-variant="direction" placeholder="Describe the changes you want, including any areas you marked">${E(v.direction)}</textarea></label><label>Aspect ratio<select class="control" data-variant="aspectRatio">${IMAGE_FORMATS.map(f=>`<option value="${f.ratio}" ${v.aspectRatio === f.ratio ? 'selected' : ''}>${E(f.ratio)} · ${E(f.label)}</option>`).join('')}</select></label><label>New style name<input class="control" data-variant="name" value="${E(v.name)}"></label><div class="two"><label>Image provider<select class="control" data-maker="provider">${available.map(([id, x]) => `<option value="${E(id)}" ${S.maker.provider === id ? 'selected' : ''}>${E(x.label || id)}</option>`).join('')}</select></label><label>Image model<select class="control" data-maker="model">${styleModels(S.maker.provider, S.companionDevices).map(([id, label]) => `<option value="${E(id)}" ${S.maker.model === id ? 'selected' : ''}>${E(label)}</option>`).join('')}</select></label></div><p class="muted">${['codex','antigravity'].includes(S.maker.provider) ? 'Companion generation costs 0 Smilecraft credits.' : 'Creating a variation costs 10 credits in the cloud.'}</p><button class="btn primary" data-a="variant-generate" ${S.busy || !available.length ? 'disabled' : ''}>${S.busy === 'variant' ? 'Creating variation…' : 'Create new style from these changes'}</button></section>`;
+  return `<section class="card form style-variant-editor"><div class="row"><div><span class="eyebrow">STYLE VARIATION</span><h2>${E(v.source.name)}</h2></div><button class="btn" data-a="variant-close" ${S.busy ? 'disabled' : ''}>Close</button></div><p class="muted">Draw on the full image. Each mark gets a number and a matching line below where you can describe the change. The result is saved as a new style.</p><div class="variant-preview"><canvas id="style-marker" width="${v.image.naturalWidth}" height="${v.image.naturalHeight}" aria-label="Mark areas to change on the full design"></canvas></div><div class="row"><button class="btn" data-a="variant-undo" ${S.busy ? 'disabled' : ''}>Undo mark</button><button class="btn" data-a="variant-clear" ${S.busy ? 'disabled' : ''}>Clear marks</button></div><label>What changes would you like?<textarea class="control" data-variant="direction" placeholder="Describe the changes you want, including any areas you marked">${E(v.direction)}</textarea></label><label>New style name<input class="control" data-variant="name" value="${E(v.name)}"></label><div class="two"><label>Image provider<select class="control" data-maker="provider">${available.map(([id, x]) => `<option value="${E(id)}" ${S.maker.provider === id ? 'selected' : ''}>${E(x.label || id)}</option>`).join('')}</select></label><label>Image model<select class="control" data-maker="model">${styleModels(S.maker.provider, S.companionDevices).map(([id, label]) => `<option value="${E(id)}" ${S.maker.model === id ? 'selected' : ''}>${E(label)}</option>`).join('')}</select></label></div><p class="muted">${['codex','antigravity'].includes(S.maker.provider) ? 'Companion generation costs 0 Smilecraft credits.' : 'Creating a variation costs 10 credits in the cloud.'}</p><button class="btn primary" data-a="variant-generate" ${S.busy || !available.length ? 'disabled' : ''}>${S.busy === 'variant' ? 'Creating variation…' : 'Create new style from these changes'}</button></section>`;
 }
 async function openStyleVariant(id) {
   if(S.me?.companionEnabled) S.companionDevices = (await api('/api/companion/devices')).devices;
@@ -283,7 +280,7 @@ async function openStyleVariant(id) {
     if (!response.ok) throw Error('Could not load the style reference.');
     const referenceImage = await fileDataUrl(await response.blob());
     const image = new Image(); image.src = referenceImage; await image.decode();
-    S.variant = { source, image, referenceImage, strokes: [], nextMarkNumber: 1, direction: '', aspectRatio: source.data?.aspectRatio || '4:5', name: `${source.name} — variation` };
+    S.variant = { source, image, referenceImage, strokes: [], nextMarkNumber: 1, direction: '', name: `${source.name} — variation` };
   } finally { S.busy = ''; render(); }
   root.querySelector('.style-variant-editor')?.scrollIntoView({behavior:'smooth', block:'start'});
 }
@@ -294,8 +291,8 @@ async function generateStyleVariant() {
   const revisionNotes = v.direction.trim();
   S.busy = 'variant'; render();
   try {
-    const result = await renderClientStyle(clientId, { sourceTemplateId: v.source.id, designId: DESIGN_SYSTEMS[0].id, referenceImage: v.referenceImage, moodImage: v.strokes.length ? styleReferenceImage(v.image, v.strokes) : '', revisionNotes, aspectRatio: v.aspectRatio, name: m.name, businessType: m.businessType, brand: {name:m.name, primary:m.primary, accent:m.accent}, primary:m.primary, accent:m.accent, language:m.language, languageNotes:m.languageNotes, logoImage:m.logoImage, provider:m.provider, model:m.model });
-    await api(`/api/clients/${clientId}/templates`, {name:v.name.trim(), image:await fitStyleImage(result.image,v.aspectRatio), aspectRatio:v.aspectRatio});
+    const result = await renderClientStyle(clientId, { sourceTemplateId: v.source.id, designId: DESIGN_SYSTEMS[0].id, referenceImage: v.referenceImage, moodImage: v.strokes.length ? styleReferenceImage(v.image, v.strokes) : '', revisionNotes, name: m.name, businessType: m.businessType, brand: {name:m.name, primary:m.primary, accent:m.accent}, primary:m.primary, accent:m.accent, language:m.language, languageNotes:m.languageNotes, logoImage:m.logoImage, provider:m.provider, model:m.model });
+    await api(`/api/clients/${clientId}/templates`, {name:v.name.trim(), image:result.image});
     S.templates = (await api(`/api/clients/${clientId}/templates`)).templates;
     S.me = await api('/api/me'); S.variant = null;
     toast('New style added to this client.');
