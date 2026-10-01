@@ -16,6 +16,8 @@ const slide = (value, i, role) => ({id:`slide-${i+1}`,role,heading:value.heading
 const imageModels = Object.fromEntries(['codex','antigravity'].map(provider => [provider, IMAGE_MODELS[provider].map(([id,label]) => ({id,label}))]));
 const encode = bytes => { let out=''; const b=new Uint8Array(bytes); for(let i=0;i<b.length;i+=8190) out+=btoa(String.fromCharCode(...b.subarray(i,i+8190))); return out; };
 async function imageReferences(env, job) {
+  const styleInput=JSON.parse(job.input);
+  if(styleInput.styleGeneration) return Promise.all(styleInput.references.map(async ref=>{const asset=await assetBytes(env,job.account_id,styleInput.clientId,ref.assetId);if(!asset)throw error('Style reference is unavailable.',409);return {name:ref.name,mime:asset.mime,data:encode(asset.bytes)};}));
   const row=await env.DB.prepare('SELECT client_id FROM projects WHERE id=? AND account_id=?').bind(job.project_id,job.account_id).first();
   const project=row && await getProject(env,job.account_id,row.client_id,job.project_id);
   const {copyRevision,aspectRatio,templateId}=JSON.parse(job.input);
@@ -78,7 +80,9 @@ export async function companionRoute(request, env, viewer, url) {
     if (!ready.length) return json({job:null});
     const lease=random();
     const row=await env.DB.prepare(`UPDATE companion_jobs SET status='running',lease=?,lease_until=? WHERE id=(SELECT id FROM companion_jobs WHERE device_id=? AND status='queued' AND expires_at>? AND provider IN (${ready.map(()=>'?').join(',')}) AND (SELECT COUNT(*) FROM companion_jobs j WHERE j.device_id=? AND j.provider=companion_jobs.provider AND j.status='running')<5 ORDER BY created_at LIMIT 1) AND status='queued' RETURNING *`).bind(lease,Date.now()+60000,d.id,Date.now(),...ready,d.id).first();
-    return json({job:row?{id:row.id,provider:row.provider,task:row.task,input:JSON.parse(row.input),lease,expiresAt:row.expires_at}:null});
+    const jobInput=row ? JSON.parse(row.input) : null;
+    if(jobInput) delete jobInput.references;
+    return json({job:row?{id:row.id,provider:row.provider,task:row.task,input:jobInput,lease,expiresAt:row.expires_at}:null});
   }
   const match=/^\/jobs\/([0-9a-f-]{36})\/(heartbeat|complete)$/.exec(path);
   const references=/^\/jobs\/([0-9a-f-]{36})\/references$/.exec(path);
@@ -105,6 +109,15 @@ export async function companionRoute(request, env, viewer, url) {
       if (!['generation_failed','cancelled'].includes(v.error)) return bad('Invalid error.');
       await env.DB.prepare("UPDATE companion_jobs SET status='failed',error='Local generation failed. Check CLI sign-in and companion diagnostics.' WHERE id=? AND status='running' AND lease=?").bind(id,v.lease).run();
       return json({ok:true});
+    }
+    const styleInput=JSON.parse(job.input);
+    if (styleInput.styleGeneration) {
+      const image=decodeImage(v.result?.image);
+      const asset=await saveAsset(env,job.account_id,styleInput.clientId,{kind:'template-reference',name:'Generated style',...image});
+      const next={...styleInput,resultAssetId:asset.id};
+      delete next.references;
+      const updated=await env.DB.prepare("UPDATE companion_jobs SET input=?,status='succeeded' WHERE id=? AND status='running' AND lease=? AND lease_until>? AND expires_at>?").bind(JSON.stringify(next),id,v.lease,Date.now(),Date.now()).run();
+      return updated.meta.changes ? json({ok:true}) : bad('Job is no longer active.',409);
     }
     const result=job.task==='image'?null:validateResult(job.task,v.result);
     const projectRow=await env.DB.prepare('SELECT * FROM projects WHERE id=? AND account_id=? AND archived=0').bind(job.project_id,job.account_id).first();
@@ -193,4 +206,30 @@ export async function enqueueCompanion(env,viewer,project,input) {
   await env.DB.prepare('INSERT OR IGNORE INTO companion_jobs(id,account_id,user_id,device_id,project_id,request_key,provider,task,slide_index,project_revision,input,created_at,expires_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)').bind(id,viewer.account_id,viewer.user_id,d.id,project.id,key,provider,task,slideIndex,project.revision,JSON.stringify({prompt,model,...(task==='image'?{copyRevision:project.slides[slideIndex].copyRevision,aspectRatio:imageFormat(project.generation?.aspectRatio).ratio,templateId:project.templateId}: {})}),t,t+660000).run();
   const saved=await env.DB.prepare('SELECT id,status FROM companion_jobs WHERE account_id=? AND request_key=?').bind(viewer.account_id,key).first();
   return {job:{id:saved.id,stage:task,status:saved.status,quotedCredits:0}};
+}
+
+export async function enqueueCompanionStyle(env, viewer, client, input) {
+  if (!await enabled(env,viewer.account_id)) throw error('Companion access is disabled.',403);
+  const devices=(await env.DB.prepare('SELECT * FROM companion_devices WHERE account_id=? AND revoked=0 AND last_seen>?').bind(viewer.account_id,Date.now()-60000).all()).results;
+  const selected=devices.find(d=>{const c=JSON.parse(d.capabilities)[input.provider];return c?.ready && c.imageModels?.some(m=>m.id===input.model);});
+  if(!selected) throw error('Start the companion and select an available image model.',409);
+  const references=[];
+  for(const ref of input.references) {
+    const image=decodeImage(`data:${ref.mime};base64,${ref.data}`);
+    const asset=await saveAsset(env,viewer.account_id,client.id,{kind:'style-generation-reference',name:ref.name,...image});
+    references.push({name:ref.name,assetId:asset.id});
+  }
+  const id=crypto.randomUUID(), t=Date.now();
+  await env.DB.prepare('INSERT INTO companion_jobs(id,account_id,user_id,device_id,project_id,request_key,provider,task,slide_index,project_revision,input,created_at,expires_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)').bind(id,viewer.account_id,viewer.user_id,selected.id,null,id,input.provider,'image',null,0,JSON.stringify({...input,references,styleGeneration:true,clientId:client.id}),t,t+660000).run();
+  return {job:{id,status:'queued',quotedCredits:0}};
+}
+export async function companionStyleResult(env, accountId, clientId, id) {
+  await expireCompanionJobs(env);
+  const job=await env.DB.prepare('SELECT * FROM companion_jobs WHERE id=? AND account_id=?').bind(id,accountId).first();
+  const input=job && JSON.parse(job.input);
+  if(!input?.styleGeneration || input.clientId!==clientId) throw error('Style job not found.',404);
+  if(job.status!=='succeeded') return {job:{id,status:job.status,error:job.error}};
+  const asset=await assetBytes(env,accountId,clientId,input.resultAssetId);
+  if(!asset) throw error('Generated style image is unavailable.',409);
+  return {job:{id,status:job.status},image:`data:${asset.mime};base64,${encode(asset.bytes)}`};
 }

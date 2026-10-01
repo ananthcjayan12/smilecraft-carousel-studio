@@ -1,3 +1,4 @@
+import { imageFormat } from '../web/image-formats.js';
 import { selectedReferenceContext } from './prompt-context.mjs';
 import { compatibleModel } from '../web/provider-models.js';
 import http from 'node:http';
@@ -96,7 +97,7 @@ if(parts[0]==='api'&&parts[1]==='clients'&&parts[3]==='templates'&&parts.length=
   const parsed=parseDataUrl(d.image);await sharp(parsed.bytes).metadata();
   const asset=await storeAsset(client.id,{kind:'template-reference',name:d.name||'Custom reference',mime:parsed.mime,bytes:parsed.bytes});
   const templateId='custom:'+crypto.randomUUID();
-  installTemplateRecords(client.id,[{id:templateId,packId:templateId,packVersion:'1.0.0',name:String(d.name||'Custom reference').slice(0,100),businessPackId:client.businessPackId,mode:'slides',data:{slides:Array.from({length:5},(_,i)=>({position:i+1,assetId:asset.id}))},checksum:asset.checksum}]);
+  installTemplateRecords(client.id,[{id:templateId,packId:templateId,packVersion:'1.0.0',name:String(d.name||'Custom reference').slice(0,100),businessPackId:client.businessPackId,mode:'slides',data:{aspectRatio:imageFormat(d.aspectRatio).ratio,slides:Array.from({length:5},(_,i)=>({position:i+1,assetId:asset.id}))},checksum:asset.checksum}]);
   return send(res,201,{template:getTemplate(client.id,templateId)});
 }
 if(parts[0]==='api'&&parts[1]==='clients'&&parts[3]==='style-maker'&&parts[4]==='render'&&req.method==='POST'){
