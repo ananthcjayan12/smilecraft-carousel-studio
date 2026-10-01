@@ -171,3 +171,29 @@ test('parallel local images keep both slides when completed in reverse order',as
   assert.notEqual(saved.slides[0].artworkAssetId,saved.slides[1].artworkAssetId);
   sqlite.close();
 });
+
+test('companion receives selected format and cannot attach artwork after a format change', async () => {
+  const { sqlite, env, viewer } = fixture();
+  const pair = await (await route(env, viewer, '/devices/pairing', 'POST', {})).json();
+  const device = await (await route(env, null, '/pair', 'POST', { code: pair.code, name: 'Laptop' })).json();
+  await route(env, null, '/poll', 'POST', caps, device.token);
+  const url = new URL('https://test.example/api/clients/c/projects');
+  const project = (await (await apiRoute(new Request(url, { method: 'POST', body: JSON.stringify({ topic: 'Story', generation: { aspectRatio: '9:16' } }) }), env, viewer, url)).json()).project;
+  const data = JSON.parse(sqlite.prepare('SELECT project_json FROM projects WHERE id=?').get(project.id).project_json);
+  data.slides[0].approved = true;
+  sqlite.prepare('UPDATE projects SET project_json=? WHERE id=?').run(JSON.stringify(data), project.id);
+  const current = await getProject(env, 'a', 'c', project.id);
+  await enqueueCompanion(env, viewer, current, { stage: 'image', slideIndex: 0, provider: 'codex', model: 'imagegen', idempotencyKey: crypto.randomUUID() });
+  const job = (await (await route(env, null, '/poll', 'POST', caps, device.token)).json()).job;
+  assert.equal(job.input.aspectRatio, '9:16');
+  assert.match(job.input.prompt, /Required output aspect ratio: 9:16/);
+  assert.doesNotMatch(job.input.prompt, /4:5/);
+  const patchUrl = new URL(`https://test.example/api/clients/c/projects/${project.id}`);
+  assert.equal((await apiRoute(new Request(patchUrl, { method: 'PATCH', body: JSON.stringify({ expectedRevision: current.revision, generation: { ...current.generation, aspectRatio: '1:1' } }) }), env, viewer, patchUrl)).status, 200);
+  await assert.rejects(() => route(env, null, `/jobs/${job.id}/references`, 'POST', { lease: job.lease }, device.token), { status: 409 });
+  const image = 'data:image/png;base64,' + Buffer.from([137,80,78,71,13,10,26,10,1,2,3]).toString('base64');
+  const response = await route(env, null, `/jobs/${job.id}/complete`, 'POST', { lease: job.lease, result: { image } }, device.token);
+  assert.equal(response.status, 409);
+  assert.equal((await getProject(env, 'a', 'c', project.id)).slides[0].artworkAssetId, '');
+  sqlite.close();
+});

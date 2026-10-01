@@ -33,3 +33,11 @@ The Worker migrations `cloudflare/migrations/0006_companion.sql` and `cloudflare
 For images, choose GPT-5.6 Sol, Terra, or Luna to select the Codex model directing built-in image generation, as in `v.a.1`. Sol is the first choice for new selections. “Codex default” preserves the CLI-configured model. These choices do not select the underlying image renderer.
 
 After upgrading, restart the rebuilt companion so it advertises the restored choices, and refresh the web app. The updated web/Worker code must also be running. Older companions advertise only “Codex default”; jobs for explicit models require the updated companion and never silently fall back. Existing projects retain their saved choice, so select Sol explicitly for projects previously saved with the default.
+
+### Refresh installers for an existing tag
+
+Open **Actions → Build companion installers → Run workflow**, choose the branch or commit containing the new code, and enter the existing tag (for example `companion-v0.1.0`) in **release_tag**. The companion version must still match that tag. After all three builds and checksums pass, the workflow replaces the installers and checksums in the existing release and updates its release notes. Rerunning a tag workflow also replaces its assets, but rebuilds that tag's commit. A manual run with a blank release_tag only uploads Actions artifacts. Refreshing assets does not move the Git tag; use a new version/tag when the source commit itself must be immutable and traceable.
+
+### Output format
+
+Choose **Output format** in the carousel Brief or Style step before generating images. The selection applies to both cloud API generation and local companion generation. The supported presets are 4:5 portrait, 1:1 square, 9:16 Story/Reel cover, 3:4 tall feed, 16:9 widescreen, and 1.91:1 landscape. Changing it keeps approved copy and clears artwork for regeneration. Every PNG in the downloaded ZIP has the selected pixel dimensions. Providers with limited ratios use the nearest supported canvas; the export adds white margins when needed to preserve the full design.

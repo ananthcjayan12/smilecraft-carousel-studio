@@ -1,3 +1,5 @@
+import { IMAGE_FORMATS, imageFormat } from './image-formats.js';
+import { finalArtworkBlob } from './canvas.js';
 import { starterSlides } from "./data.js";
 import { IMAGE_MODELS, WRITING_MODELS } from "./provider-models.js";
 import { createGenerationRun } from "./generation-run.js";
@@ -300,7 +302,7 @@ function render() {
 function studio() {
   let p = S.p;
   const stepNotes = ["Set the direction", "Approve the words", "Create the artwork", "Inspect each slide", "Download your files"];
-  return `<div class="studio-title"><button data-a="back">← Back to projects</button><div class="studio-title-row"><div><span class="eyebrow">CAROUSEL EDITOR</span><h1>${E(p.topic || "New carousel")}</h1><p>${E(S.client.name)} <span aria-hidden="true">·</span> ${status(p)}</p></div><span class="studio-progress">Step ${p.stage + 1} of 5</span></div></div><div class="steps" aria-label="Carousel steps">${["Brief", "Copy", "Style", "Review", "Export"].map((x, i) => `<button class="${p.stage === i ? "on" : ""}" data-a="stage" data-v="${i}" ${p.stage === i ? 'aria-current="step"' : ''}><span class="step-dot">${i < p.stage ? '✓' : i + 1}</span><span><b>${x}</b><small>${stepNotes[i]}</small></span></button>`).join("")}</div>${S.generationRun ? `<div role="status"><button class="btn" data-a="stop-generation" ${S.generationRun.stopping ? "disabled" : ""}>${S.generationRun.stopping ? "Stopping…" : "Stop generation"}</button><p class="muted">Stops unfinished jobs. Work already processed by the AI provider may still cost money.</p></div>` : ""}<div class="studio-workspace">${p.stage === 0 ? brief() : p.stage === 1 ? copy() : p.stage === 2 ? design() : p.stage === 3 ? review() : exportPage()}</div>`;
+  return `<div class="studio-title"><button data-a="back">← Back to projects</button><div class="studio-title-row"><div><span class="eyebrow">CAROUSEL EDITOR</span><h1>${E(p.topic || "New carousel")}</h1><p>${E(S.client.name)} <span aria-hidden="true">·</span> ${status(p)}</p></div><span class="studio-progress">Step ${p.stage + 1} of 5</span></div></div><div class="steps" aria-label="Carousel steps">${["Brief", "Copy", "Style", "Review", "Export"].map((x, i) => `<button class="${p.stage === i ? "on" : ""}" data-a="stage" data-v="${i}" ${p.stage === i ? 'aria-current="step"' : ''}><span class="step-dot">${i < p.stage ? '✓' : i + 1}</span><span><b>${x}</b><small>${stepNotes[i]}</small></span></button>`).join("")}</div>${S.generationRun ? `<div role="status"><button class="btn" data-a="stop-generation" ${S.generationRun.stopping ? "disabled" : ""}>${S.generationRun.stopping ? "Stopping…" : "Stop generation"}</button><p class="muted">Stops unfinished jobs. Work already processed by the AI provider may still cost money.</p></div>` : ""}<div class="studio-workspace" style="--artwork-ratio:${imageFormat(p.generation?.aspectRatio).ratio.replace(':', '/')}">${p.stage === 0 ? brief() : p.stage === 1 ? copy() : p.stage === 2 ? design() : p.stage === 3 ? review() : exportPage()}</div>`;
 }
 function writingControls() {
   const g =
@@ -322,6 +324,10 @@ function writingControls() {
     .join(
       "",
     )}</select></label><label>Model<select class="control" data-g="writingModel">${models.map(([id, label]) => `<option value="${id}" ${id === g.writingModel ? "selected" : ""}>${E(label)}</option>`).join("")}</select></label></div>`;
+}
+function formatControl() {
+  const format = imageFormat(S.p.generation?.aspectRatio);
+  return `<label>Output format<select class="control" data-g="aspectRatio" ${S.busy ? 'disabled' : ''}>${IMAGE_FORMATS.map(f => `<option value="${f.ratio}" ${f.ratio === format.ratio ? 'selected' : ''}>${E(f.label)} · ${f.ratio} · ${f.width} × ${f.height}</option>`).join('')}</select></label><p class="muted">Every slide uses this format. Changing it clears existing artwork and keeps approved copy. Downloads preserve the full image, adding margins if needed.</p>`;
 }
 function imageControls() {
   const g =
@@ -370,7 +376,7 @@ function brief() {
     )
     .join(
       "",
-    )}</div><h2>Choose the language</h2>${languageControl()}<h2>Choose a reference template</h2><p class="muted">The selected template guides copy length, hierarchy and visual concepts for the five-slide draft.</p>${templateSelector()}<h2>Choose the writing model</h2><p class="muted">This provider will write one coherent five-slide draft using the selected reference and language combination.</p>${writingControls()}${S.busy === "draft" ? `<div class="generation-progress" role="status"><div class="spinner"></div><div><b>Creating your five-slide draft…</b><span>Reviewing the brief, language, reference template and story before preparing slide copy.</span></div><i></i></div>` : ""}<button class="btn" data-a="starter" ${S.busy ? "disabled" : ""}>Use editable starter</button><button class="btn primary right" data-a="draft" ${S.busy || !S.p.topic.trim() || !S.p.templateId || !String(S.p.language || "").trim() ? "disabled" : ""}>${S.busy === "draft" ? "Generating draft…" : "Generate draft →"}</button></section>`;
+    )}</div><h2>Choose the language</h2>${languageControl()}<h2>Choose the output format</h2>${formatControl()}<h2>Choose a reference template</h2><p class="muted">The selected template guides copy length, hierarchy and visual concepts for the five-slide draft.</p>${templateSelector()}<h2>Choose the writing model</h2><p class="muted">This provider will write one coherent five-slide draft using the selected reference and language combination.</p>${writingControls()}${S.busy === "draft" ? `<div class="generation-progress" role="status"><div class="spinner"></div><div><b>Creating your five-slide draft…</b><span>Reviewing the brief, language, reference template and story before preparing slide copy.</span></div><i></i></div>` : ""}<button class="btn" data-a="starter" ${S.busy ? "disabled" : ""}>Use editable starter</button><button class="btn primary right" data-a="draft" ${S.busy || !S.p.topic.trim() || !S.p.templateId || !String(S.p.language || "").trim() ? "disabled" : ""}>${S.busy === "draft" ? "Generating draft…" : "Generate draft →"}</button></section>`;
 }
 function copy() {
   let s = sp();
@@ -382,7 +388,7 @@ function design() {
   const progressPercent = progress
     ? Math.round((progress.completed / Math.max(1, progress.total)) * 100)
     : 0;
-  return `<section class="card form"><span>STEP 3 OF 5</span><h2>Choose the image model</h2><p class="muted">Select the provider and model used to turn the approved copy into artwork.</p>${imageControls()}<h2>Generate artwork</h2><p class="muted">Using <b>${E(S.templates.find((t) => t.id === S.p.templateId)?.name || "the selected reference")}</b>. ${ap() === 5 ? "Your copy is approved. Generate all five slides, then inspect each one." : `Approve ${5 - ap()} more slides first.`}</p>${progress ? `<div class="generation-progress" role="status" aria-live="polite"><div class="spinner"></div><div><b>${progress.total === 1 ? `Creating slide ${S.i + 1}…` : `Creating carousel artwork… ${progress.completed}/${progress.total}`}</b><span>${progress.active ? `${progress.active} image${progress.active === 1 ? "" : "s"} generating now. ` : ""}${progress.failed ? `${progress.failed} failed. ` : ""}You can leave this screen open while generation finishes.</span></div><i class="determinate" style="width:${progressPercent}%"></i></div>` : ""}<button class="btn" data-a="one" ${S.busy || !s.approved || !S.p.templateId ? "disabled" : ""}>${S.busy === "image" ? "Generating slide…" : s.artworkAssetId ? "Regenerate selected" : "Generate selected"}</button>${im() > 0 ? `<button class="btn" data-a="regenerate-all" ${S.busy || ap() !== 5 || !S.p.templateId ? "disabled" : ""}>Regenerate all 5 slides</button>` : ""}${im() === 5 ? `<button class="btn primary right" data-a="go-review" ${S.busy ? "disabled" : ""}>Go to review →</button>` : `<button class="btn primary right" data-a="all" ${S.busy || ap() !== 5 || !S.p.templateId ? "disabled" : ""}>${S.busy === "images" ? `Generating ${progress?.completed || 0}/${progress?.total || 5}…` : "Generate all 5 slides →"}</button>`}</section>`;
+  return `<section class="card form"><span>STEP 3 OF 5</span><h2>Choose the image model</h2><p class="muted">Select the provider and model used to turn the approved copy into artwork.</p>${imageControls()}${formatControl()}<h2>Generate artwork</h2><p class="muted">Using <b>${E(S.templates.find((t) => t.id === S.p.templateId)?.name || "the selected reference")}</b>. ${ap() === 5 ? "Your copy is approved. Generate all five slides, then inspect each one." : `Approve ${5 - ap()} more slides first.`}</p>${progress ? `<div class="generation-progress" role="status" aria-live="polite"><div class="spinner"></div><div><b>${progress.total === 1 ? `Creating slide ${S.i + 1}…` : `Creating carousel artwork… ${progress.completed}/${progress.total}`}</b><span>${progress.active ? `${progress.active} image${progress.active === 1 ? "" : "s"} generating now. ` : ""}${progress.failed ? `${progress.failed} failed. ` : ""}You can leave this screen open while generation finishes.</span></div><i class="determinate" style="width:${progressPercent}%"></i></div>` : ""}<button class="btn" data-a="one" ${S.busy || !s.approved || !S.p.templateId ? "disabled" : ""}>${S.busy === "image" ? "Generating slide…" : s.artworkAssetId ? "Regenerate selected" : "Generate selected"}</button>${im() > 0 ? `<button class="btn" data-a="regenerate-all" ${S.busy || ap() !== 5 || !S.p.templateId ? "disabled" : ""}>Regenerate all 5 slides</button>` : ""}${im() === 5 ? `<button class="btn primary right" data-a="go-review" ${S.busy ? "disabled" : ""}>Go to review →</button>` : `<button class="btn primary right" data-a="all" ${S.busy || ap() !== 5 || !S.p.templateId ? "disabled" : ""}>${S.busy === "images" ? `Generating ${progress?.completed || 0}/${progress?.total || 5}…` : "Generate all 5 slides →"}</button>`}</section>`;
 }
 const art = (s) =>
   s.artworkAssetId
@@ -437,7 +443,8 @@ async function exportCarousel() {
     for (let i = 0; i < 5; i++) {
       const response = await fetch(`/api/clients/${S.client.id}/assets/${S.p.slides[i].artworkAssetId}`);
       if (!response.ok) throw Error(`Could not load slide ${i + 1} (${response.status}).`);
-      files.push({ name: `slide-${i + 1}.png`, data: new Uint8Array(await response.arrayBuffer()) });
+      const artwork = await finalArtworkBlob(await response.blob(), S.p.generation?.aspectRatio);
+      files.push({ name: `slide-${i + 1}.png`, data: new Uint8Array(await artwork.arrayBuffer()) });
       progress(i + 1, i < 4 ? `Collecting slide ${i + 2} of 5…` : "Creating ZIP…");
     }
     const encoder = new TextEncoder();
@@ -915,6 +922,9 @@ root.onchange = async (e) => {
     }
     if (x.dataset.g) {
       const g = S.p.generation || (S.p.generation = {});
+      if (x.dataset.g === "aspectRatio" && imageFormat(g.aspectRatio).ratio !== x.value) {
+        S.p.slides = S.p.slides.map(slide => ({ ...slide, artworkAssetId: '', artworkReviewed: false, artworkReviewedAt: '' }));
+      }
       g[x.dataset.g] = x.value;
       if (x.dataset.g === "writingProvider")
         g.writingModel = ["codex","antigravity"].includes(x.value) ? "" : WRITING_MODELS[x.value]?.[0]?.[0] || "";

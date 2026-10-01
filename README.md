@@ -131,3 +131,11 @@ See `docs/IMPLEMENTATION-LOG.md` for verification details.
 ## Companion desktop app (feature gated)
 
 Accounts can be granted access to a local Codex or Antigravity companion by the service administrator in Settings. Enabled users create a five-minute pairing code under **Settings → AI on your computer**, pair the [Smilecraft Companion](apps/companion-desktop/README.md), and select the local CLI for copy or slide image generation. Local generation uses the user's CLI subscription and no Smilecraft credits. Apply `cloudflare/migrations/0006_companion.sql` and `cloudflare/migrations/0007_companion_images.sql` before deploying this Worker version. The companion installer workflow is `.github/workflows/companion-release.yml`.
+
+### Carousel output formats
+
+Use **Output format** in Brief or Style to select 4:5 portrait carousel, 1:1 square post, 9:16 Story/Reel cover, 3:4 tall feed, 16:9 widescreen, or 1.91:1 landscape. The project saves the selection and uses it for OpenAI/Gemini requests, local Codex/Antigravity companion prompts, previews and ZIP exports. Older projects default to 4:5. A format change clears existing artwork while retaining copy approval. Exports fit the entire image to the selected dimensions with white margins if necessary, preserving text and logos.
+
+Provider size handling follows the [OpenAI image output documentation](https://developers.openai.com/api/docs/guides/image-generation) and [Gemini image generation documentation](https://ai.google.dev/gemini-api/docs/image-generation). GPT Image 2/2.5 receive custom dimensions, earlier GPT Image models use supported square/portrait/landscape sizes, and Gemini receives an explicit aspect ratio (16:9 for the 1.91:1 landscape preset).
+
+To rebuild installers from current code under an existing release tag, use the companion workflow's **release_tag** input. See [companion release instructions](apps/companion-desktop/README.md#refresh-installers-for-an-existing-tag).

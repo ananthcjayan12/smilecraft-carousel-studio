@@ -1,10 +1,11 @@
+import { imageFormat } from './image-formats.js';
 import { IMAGE_MODELS, WRITING_MODELS, compatibleModel } from './provider-models.js';
 
 export function repairGeneration(g = {}) {
   const provider = ['openai', 'gemini', 'codex', 'antigravity'].includes(g.provider) ? g.provider : 'openai';
   const writingProvider = ['openai', 'gemini', 'claude', 'codex', 'antigravity'].includes(g.writingProvider) ? g.writingProvider : 'openai';
   const model = compatibleModel(provider, g.model, 'image');
-  return { ...g, provider, writingProvider, model, writingModel: ['codex', 'antigravity'].includes(writingProvider) ? String(g.writingModel || '') : compatibleModel(writingProvider, g.writingModel) };
+  return { ...g, aspectRatio: imageFormat(g.aspectRatio).ratio, provider, writingProvider, model, writingModel: ['codex', 'antigravity'].includes(writingProvider) ? String(g.writingModel || '') : compatibleModel(writingProvider, g.writingModel) };
 }
 
 export function generationControls(g, status, kind, escape, agyModels = []) {

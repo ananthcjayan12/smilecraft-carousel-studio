@@ -439,7 +439,7 @@ pub fn generate_image(
         args.extend(["--".into(),format!("$imagegen\nUse built-in image generation to create exactly one finished image using HIGH image quality. Inspect the attached reference and logo images. Save the result as final-slide.png in the current working directory. Do not call an API manually or only describe the image.\n{}",job.input.prompt)]);
         (resolve("codex", &paths.codex)?, args)
     } else {
-        let instruction=format!("Call the native generate_image tool to make one final image. Set ImageName exactly to final-slide.png and ImagePaths to {}. Keep the slide inside a 4:5 safe area. Save the image in the current working directory. Do not only describe it.\n{}",serde_json::to_string(&files).unwrap(),job.input.prompt);
+        let instruction=format!("Call the native generate_image tool to make one final image. Set ImageName exactly to final-slide.png and ImagePaths to {}. Use the output aspect ratio and safe area specified in the prompt. Save the image in the current working directory. Do not only describe it.\n{}",serde_json::to_string(&files).unwrap(),job.input.prompt);
         (
             resolve("agy", &paths.antigravity)?,
             vec![

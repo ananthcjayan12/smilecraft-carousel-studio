@@ -193,3 +193,66 @@ test('cancellation racing with a provider result cannot attach or charge it', as
   assert.equal(sqlite.prepare('SELECT SUM(amount) AS n FROM credit_ledger').get().n,3);
   sqlite.close();
 });
+
+test('hosted image requests use saved output format for both API providers', async () => {
+  const { sqlite, env } = fixture();
+  sqlite.prepare("INSERT INTO credit_ledger(id,account_id,amount,kind,source_id) VALUES('formats','a',200,'manual_plan','formats')").run();
+  env.GEMINI_API_KEY = 'test';
+  env.STATIC = { fetch: async () => new Response(new Uint8Array([0xff, 0xd8, 0xff]), { headers: { 'Content-Type': 'image/jpeg' } }) };
+  env.ASSETS = { put: async () => {}, delete: async () => {} };
+  const p = await project(env);
+  const originalFetch = globalThis.fetch;
+  try {
+    for (const [ratio, size] of [['1:1', '1024x1024'], ['9:16', '864x1536'], ['16:9', '1536x864']]) {
+      for (const provider of ['openai', 'gemini']) {
+        const value = JSON.parse(sqlite.prepare('SELECT project_json FROM projects WHERE id=?').get(p.id).project_json);
+        value.generation.aspectRatio = ratio; value.slides[0].approved = true;
+        sqlite.prepare('UPDATE projects SET project_json=? WHERE id=?').run(JSON.stringify(value), p.id);
+        const current = await getProject(env, 'a', 'c', p.id);
+        const queued = await runJob(env, 'a', 'c', current, { stage: 'image', slideIndex: 0, provider, model: provider === 'openai' ? 'gpt-image-2' : 'gemini-3.1-flash-image', idempotencyKey: crypto.randomUUID() });
+        globalThis.fetch = async (_url, options) => {
+          if (provider === 'openai') {
+            assert.equal(options.body.get('size'), size);
+            assert.ok(options.body.get('prompt').includes(`Required output aspect ratio: ${ratio}.`));
+            return Response.json({ data: [{ b64_json: 'iVBORw0KGgo=' }] });
+          }
+          assert.equal(JSON.parse(options.body).response_format.aspect_ratio, ratio);
+          return Response.json({ outputs: [{ type: 'image', mime_type: 'image/png', data: Buffer.alloc(1500, 1).toString('base64') }] });
+        };
+        await consumeJob(env, queued.job.id);
+        const job = sqlite.prepare('SELECT status,error FROM generation_jobs WHERE id=?').get(queued.job.id);
+        assert.equal(job.status, 'succeeded', job.error);
+      }
+    }
+  } finally { globalThis.fetch = originalFetch; sqlite.close(); }
+});
+
+test('hosted format changes preserve copy and reject an in-flight image without charging credits', async () => {
+  const { sqlite, env } = fixture();
+  sqlite.prepare("INSERT INTO credit_ledger(id,account_id,amount,kind,source_id) VALUES('format-race','a',20,'manual_plan','format-race')").run();
+  env.STATIC = { fetch: async () => new Response(new Uint8Array([0xff, 0xd8, 0xff]), { headers: { 'Content-Type': 'image/jpeg' } }) };
+  env.ASSETS = { put: async () => {}, delete: async () => {} };
+  const p = await project(env);
+  const value = JSON.parse(sqlite.prepare('SELECT project_json FROM projects WHERE id=?').get(p.id).project_json);
+  value.slides[0].approved = true; value.slides[0].artworkAssetId = 'old'; value.slides[0].artworkReviewed = true;
+  sqlite.prepare('UPDATE projects SET project_json=? WHERE id=?').run(JSON.stringify(value), p.id);
+  const current = await getProject(env, 'a', 'c', p.id);
+  const queued = await runJob(env, 'a', 'c', current, { stage: 'image', slideIndex: 0, provider: 'openai', model: 'gpt-image-2', idempotencyKey: crypto.randomUUID() });
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async () => {
+    const url = new URL(`https://test.example/api/clients/c/projects/${p.id}`);
+    const response = await apiRoute(new Request(url, { method: 'PATCH', body: JSON.stringify({ expectedRevision: current.revision, generation: { ...current.generation, aspectRatio: '9:16' } }) }), env, { account_id: 'a' }, url);
+    assert.equal(response.status, 200);
+    const changed = (await response.json()).project;
+    assert.equal(changed.slides[0].approved, true);
+    assert.equal(changed.slides[0].artworkAssetId, '');
+    assert.equal(changed.slides[0].artworkReviewed, false);
+    return Response.json({ data: [{ b64_json: 'iVBORw0KGgo=' }] });
+  };
+  try { await consumeJob(env, queued.job.id); } finally { globalThis.fetch = originalFetch; }
+  assert.equal(sqlite.prepare('SELECT status FROM generation_jobs WHERE id=?').get(queued.job.id).status, 'failed');
+  assert.equal(sqlite.prepare('SELECT status FROM credit_reservations WHERE job_id=?').get(queued.job.id).status, 'released');
+  assert.equal((await getProject(env, 'a', 'c', p.id)).slides[0].artworkAssetId, '');
+  assert.equal(sqlite.prepare('SELECT SUM(amount) AS amount FROM credit_ledger WHERE account_id=?').get('a').amount, 23);
+  sqlite.close();
+});

@@ -1,4 +1,4 @@
-const W = 1080, H = 1350;
+import { imageFormat } from './image-formats.js';
 
 export async function optimizedImage(file, limit = 1280) {
   if (!file?.type?.startsWith('image/')) throw new Error('Please choose a PNG, JPEG or WebP image.');
@@ -9,13 +9,15 @@ export async function optimizedImage(file, limit = 1280) {
   return canvas.toDataURL(file.type === 'image/png' ? 'image/png' : 'image/jpeg', .9);
 }
 
-export async function finalArtworkBlob(dataUrl) {
-  if (!/^data:image\/(png|jpeg|webp);base64,/i.test(dataUrl || '')) throw new Error('Generate this slide artwork before downloading it.');
-  const blob = await (await fetch(dataUrl)).blob();
+export async function finalArtworkBlob(source, aspectRatio = '4:5') {
+  if (!(source instanceof Blob) && !/^data:image\/(png|jpeg|webp);base64,/i.test(source || '')) throw new Error('Generate this slide artwork before downloading it.');
+  const { width: W, height: H } = imageFormat(aspectRatio);
+  const blob = source instanceof Blob ? source : await (await fetch(source)).blob();
   const image = await createImageBitmap(blob);
   const canvas = document.createElement('canvas'); canvas.width = W; canvas.height = H;
   const ctx = canvas.getContext('2d');
-  const scale = Math.max(W / image.width, H / image.height);
+  ctx.fillStyle = '#ffffff'; ctx.fillRect(0, 0, W, H);
+  const scale = Math.min(W / image.width, H / image.height);
   const width = image.width * scale, height = image.height * scale;
   ctx.drawImage(image, (W - width) / 2, (H - height) / 2, width, height); image.close();
   return new Promise((resolve, reject) => canvas.toBlob(result => result ? resolve(result) : reject(new Error('Could not prepare final PNG.')), 'image/png'));

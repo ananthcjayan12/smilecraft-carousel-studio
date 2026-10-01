@@ -1,3 +1,4 @@
+import { imageFormat, openaiImageSize } from '../web/image-formats.js';
 import { compatibleModel, IMAGE_MODELS, WRITING_MODELS } from '../web/provider-models.js';
 import { getProject, assetBytes, saveAsset, builtinTemplate } from './studio.mjs';
 import { buildV1WritingPrompt, buildV1ImagePrompt } from './prompts.mjs';
@@ -131,7 +132,7 @@ function findImage(value) {
 }
 async function generateImage(env, job, project, clientId, request) {
   const item = project.slides[job.slide_index], context = project.contextSnapshot || {};
-  const prompt = buildV1ImagePrompt({ slide: item, slideNumber: job.slide_index + 1, contextSnapshot: { ...context, language: project.language }, brand: context.brand, referenceContext: project.templateId ? { id: project.templateId } : null, correction: job.correction });
+  const prompt = buildV1ImagePrompt({ aspectRatio: project.generation?.aspectRatio, slide: item, slideNumber: job.slide_index + 1, contextSnapshot: { ...context, language: project.language }, brand: context.brand, referenceContext: project.templateId ? { id: project.templateId } : null, correction: job.correction });
   const template = builtinTemplate(project.templateId);
   const selected = template || await env.DB.prepare('SELECT * FROM templates WHERE id=? AND account_id=? AND client_id=?').bind(project.templateId, job.account_id, clientId).first();
   if (!selected || (selected.businessPackId || selected.business_pack_id) !== project.businessPackId) throw error('The selected reference is unavailable.', 400);
@@ -150,7 +151,7 @@ async function generateImage(env, job, project, clientId, request) {
   let image;
   if (job.provider === 'openai') {
     const form = new FormData();
-    form.append('model', job.model_id); form.append('prompt', prompt); form.append('size', '1024x1536'); form.append('quality', 'medium'); form.append('output_format', 'png');
+    form.append('model', job.model_id); form.append('prompt', prompt); form.append('size', openaiImageSize(job.model_id, project.generation?.aspectRatio)); form.append('quality', 'medium'); form.append('output_format', 'png');
     form.append('image[]', new Blob([referenceBytes], { type: referenceMime }), 'reference');
     const logoId = context.brand?.logoAssetId;
     if (logoId) { const logo = await assetBytes(env, job.account_id, clientId, logoId); if (logo) form.append('image[]', new Blob([logo.bytes], { type: logo.mime }), 'logo'); }
@@ -159,7 +160,7 @@ async function generateImage(env, job, project, clientId, request) {
   } else {
     const bytes = new Uint8Array(referenceBytes);
     let base64 = ''; for (let i = 0; i < bytes.length; i += 8190) base64 += btoa(String.fromCharCode(...bytes.slice(i, i + 8190)));
-    const data = await request('https://generativelanguage.googleapis.com/v1beta/interactions', { method: 'POST', headers: { 'x-goog-api-key': env.GEMINI_API_KEY, 'Content-Type': 'application/json' }, body: JSON.stringify({ model: job.model_id, input: [{ type: 'text', text: prompt }, { type: 'image', mime_type: referenceMime, data: base64 }], response_format: { type: 'image', mime_type: 'image/png', aspect_ratio: '4:5', image_size: '2K' } }) });
+    const data = await request('https://generativelanguage.googleapis.com/v1beta/interactions', { method: 'POST', headers: { 'x-goog-api-key': env.GEMINI_API_KEY, 'Content-Type': 'application/json' }, body: JSON.stringify({ model: job.model_id, input: [{ type: 'text', text: prompt }, { type: 'image', mime_type: referenceMime, data: base64 }], response_format: { type: 'image', mime_type: 'image/png', aspect_ratio: imageFormat(project.generation?.aspectRatio).geminiRatio || imageFormat(project.generation?.aspectRatio).ratio, image_size: '2K' } }) });
     image = findImage(data);
   }
   if (!image?.base64) throw error('The provider returned no artwork.', 502);
@@ -185,7 +186,7 @@ export async function consumeJob(env, id) {
       let current = project, merged = changes;
       if (claimed.action === 'image') {
         current = await getProject(env, claimed.account_id, row.client_id, claimed.project_id);
-        if (!current || current.slides[claimed.slide_index].copyRevision !== project.slides[claimed.slide_index].copyRevision || !current.slides[claimed.slide_index].approved) throw error('Slide copy changed during image generation. Credits were returned.', 409);
+        if (!current || imageFormat(current.generation?.aspectRatio).ratio !== imageFormat(project.generation?.aspectRatio).ratio || current.templateId !== project.templateId || current.slides[claimed.slide_index].copyRevision !== project.slides[claimed.slide_index].copyRevision || !current.slides[claimed.slide_index].approved) throw error('Slide copy changed during image generation. Credits were returned.', 409);
         const slides = [...current.slides];
         slides[claimed.slide_index] = { ...slides[claimed.slide_index], ...changes.slides[claimed.slide_index] };
         merged = { slides };

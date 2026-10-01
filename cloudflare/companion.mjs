@@ -1,3 +1,4 @@
+import { imageFormat } from '../web/image-formats.js';
 import { getProject, assetBytes, saveAsset, builtinTemplate, decodeImage } from './studio.mjs';
 import { IMAGE_MODELS } from '../web/provider-models.js';
 import { buildV1WritingPrompt, buildV1ImagePrompt } from './prompts.mjs';
@@ -17,8 +18,8 @@ const encode = bytes => { let out=''; const b=new Uint8Array(bytes); for(let i=0
 async function imageReferences(env, job) {
   const row=await env.DB.prepare('SELECT client_id FROM projects WHERE id=? AND account_id=?').bind(job.project_id,job.account_id).first();
   const project=row && await getProject(env,job.account_id,row.client_id,job.project_id);
-  const copyRevision=JSON.parse(job.input).copyRevision;
-  if (!project || !project.slides[job.slide_index]?.approved || (copyRevision === undefined ? project.revision!==job.project_revision : project.slides[job.slide_index].copyRevision!==copyRevision)) throw error('Slide copy changed during generation.',409);
+  const {copyRevision,aspectRatio,templateId}=JSON.parse(job.input);
+  if (!project || (aspectRatio && imageFormat(project.generation?.aspectRatio).ratio!==aspectRatio) || (templateId && project.templateId!==templateId) || !project.slides[job.slide_index]?.approved || (copyRevision === undefined ? project.revision!==job.project_revision : project.slides[job.slide_index].copyRevision!==copyRevision)) throw error('Slide copy changed during generation.',409);
   const template=builtinTemplate(project.templateId) || await env.DB.prepare('SELECT * FROM templates WHERE id=? AND account_id=? AND client_id=?').bind(project.templateId,job.account_id,row.client_id).first();
   if (!template || (template.businessPackId||template.business_pack_id)!==project.businessPackId) throw error('Selected reference is unavailable.',409);
   const data=template.data||JSON.parse(template.data_json), ref=(template.mode==='slides'?data.slides[job.slide_index]:data.cropPaths?{staticPath:data.cropPaths[job.slide_index]}:data);
@@ -116,8 +117,8 @@ export async function companionRoute(request, env, viewer, url) {
     if (job.task==='draft') Object.assign(data,{slides:result.slides.map((s,i)=>slide(s,i,roles[i])),instagram:result.instagram.trim(),facebook:result.facebook.trim(),youtubeTitle:result.youtubeTitle.trim(),youtubeDescription:result.youtubeDescription.trim(),stage:1});
     else if(job.task==='revise') { const slides=[...data.slides], old=slides[job.slide_index]; slides[job.slide_index]={...slide(result,job.slide_index,old.role),copyRevision:(old.copyRevision||1)+1}; data.slides=slides; }
     else {
-      const copyRevision=JSON.parse(job.input).copyRevision;
-      if(!project.slides[job.slide_index]?.approved || (copyRevision === undefined ? project.revision!==job.project_revision : project.slides[job.slide_index].copyRevision!==copyRevision)) return bad('Slide copy changed during generation.',409);
+      const {copyRevision,aspectRatio,templateId}=JSON.parse(job.input);
+      if((aspectRatio && imageFormat(project.generation?.aspectRatio).ratio!==aspectRatio) || (templateId && project.templateId!==templateId) || !project.slides[job.slide_index]?.approved || (copyRevision === undefined ? project.revision!==job.project_revision : project.slides[job.slide_index].copyRevision!==copyRevision)) return bad('Slide copy changed during generation.',409);
       const image=decodeImage(v.result?.image);
       const asset=await saveAsset(env,job.account_id,projectRow.client_id,{projectId:job.project_id,kind:'generated-artwork',name:`slide-${job.slide_index+1}.png`,...image});
       const slides=[...data.slides];slides[job.slide_index]={...slides[job.slide_index],artworkAssetId:asset.id,artworkProvider:job.provider,artworkGeneratedAt:stamp(),artworkReviewed:false,artworkReviewedAt:''};data.slides=slides;
@@ -128,8 +129,8 @@ export async function companionRoute(request, env, viewer, url) {
       if(!current) return bad('Project changed during generation.',409);
       let next=data;
       if(job.task==='image') {
-        const latest=JSON.parse(current.project_json),copyRevision=JSON.parse(job.input).copyRevision;
-        if(!latest.slides[job.slide_index]?.approved || (copyRevision===undefined ? current.revision!==job.project_revision : latest.slides[job.slide_index].copyRevision!==copyRevision)) return bad('Slide copy changed during generation.',409);
+        const latest=JSON.parse(current.project_json),{copyRevision,aspectRatio,templateId}=JSON.parse(job.input);
+        if((aspectRatio && imageFormat(latest.generation?.aspectRatio).ratio!==aspectRatio) || (templateId && latest.templateId!==templateId) || !latest.slides[job.slide_index]?.approved || (copyRevision===undefined ? current.revision!==job.project_revision : latest.slides[job.slide_index].copyRevision!==copyRevision)) return bad('Slide copy changed during generation.',409);
         next={...latest,slides:[...latest.slides]};next.slides[job.slide_index]={...next.slides[job.slide_index],artworkAssetId:generatedSlide.artworkAssetId,artworkProvider:generatedSlide.artworkProvider,artworkGeneratedAt:generatedSlide.artworkGeneratedAt,artworkReviewed:false,artworkReviewedAt:''};
       }
     const [updated]=await env.DB.batch([
@@ -187,9 +188,9 @@ export async function enqueueCompanion(env,viewer,project,input) {
   const active=(await env.DB.prepare("SELECT COUNT(*) AS n FROM companion_jobs WHERE account_id=? AND status IN ('queued','running')").bind(viewer.account_id).first()).n;
   if (active>=10) throw error('Ten local jobs are already pending.',429);
   const context=project.contextSnapshot||{},referenceContext=project.templateId?{id:project.templateId}:null,correction=String(input.correction||'').slice(0,500);
-  const prompt=task==='image'?`${buildV1ImagePrompt({slide:project.slides[slideIndex],slideNumber:slideIndex+1,contextSnapshot:{...context,language:project.language},brand:context.brand,referenceContext,correction})}\nSave one finished image as final-slide.png.`:buildV1WritingPrompt(task,{contextSnapshot:{...context,language:project.language},referenceContext,topic:project.topic,notes:project.notes,slide:task==='revise'?project.slides[slideIndex]:undefined,correction});
+  const prompt=task==='image'?`${buildV1ImagePrompt({aspectRatio:project.generation?.aspectRatio,slide:project.slides[slideIndex],slideNumber:slideIndex+1,contextSnapshot:{...context,language:project.language},brand:context.brand,referenceContext,correction})}\nSave one finished image as final-slide.png.`:buildV1WritingPrompt(task,{contextSnapshot:{...context,language:project.language},referenceContext,topic:project.topic,notes:project.notes,slide:task==='revise'?project.slides[slideIndex]:undefined,correction});
   const id=crypto.randomUUID(), t=Date.now();
-  await env.DB.prepare('INSERT OR IGNORE INTO companion_jobs(id,account_id,user_id,device_id,project_id,request_key,provider,task,slide_index,project_revision,input,created_at,expires_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)').bind(id,viewer.account_id,viewer.user_id,d.id,project.id,key,provider,task,slideIndex,project.revision,JSON.stringify({prompt,model,...(task==='image'?{copyRevision:project.slides[slideIndex].copyRevision}: {})}),t,t+660000).run();
+  await env.DB.prepare('INSERT OR IGNORE INTO companion_jobs(id,account_id,user_id,device_id,project_id,request_key,provider,task,slide_index,project_revision,input,created_at,expires_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)').bind(id,viewer.account_id,viewer.user_id,d.id,project.id,key,provider,task,slideIndex,project.revision,JSON.stringify({prompt,model,...(task==='image'?{copyRevision:project.slides[slideIndex].copyRevision,aspectRatio:imageFormat(project.generation?.aspectRatio).ratio,templateId:project.templateId}: {})}),t,t+660000).run();
   const saved=await env.DB.prepare('SELECT id,status FROM companion_jobs WHERE account_id=? AND request_key=?').bind(viewer.account_id,key).first();
   return {job:{id:saved.id,stage:task,status:saved.status,quotedCredits:0}};
 }

@@ -559,8 +559,9 @@ header,
 }
 .thumbs img {
   width: 100%;
-  aspect-ratio: 4/5;
-  object-fit: cover;
+  aspect-ratio: var(--artwork-ratio, 4/5);
+  object-fit: contain;
+  background: white;
 }
 .review {
   display: grid;
@@ -588,10 +589,10 @@ header,
 .review-actions { justify-content: flex-start; }
 .art {
   width: 100%;
-  aspect-ratio: 4/5;
-  object-fit: cover;
+  aspect-ratio: var(--artwork-ratio, 4/5);
+  object-fit: contain;
   border-radius: 12px;
-  background: #edf5f4;
+  background: white;
 }
 .art.empty {
   display: grid;

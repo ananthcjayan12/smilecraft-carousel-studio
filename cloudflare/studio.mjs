@@ -1,3 +1,4 @@
+import { imageFormat } from '../web/image-formats.js';
 import { publicBusinessPacks, getBusinessPack, resolveBusinessContext, starterSlidesForPack } from '../server/business-packs.mjs';
 import { repairGeneration } from '../web/studio-controls.js';
 import { runJob, cancelJob } from './generation.mjs';
@@ -215,6 +216,7 @@ export async function apiRoute(request, env, viewer, url) {
       const input = await body();
       if (Number(input.expectedRevision) !== project.revision) return bad('Project changed since it was loaded.', 409);
       const next = { ...project, ...input, language: String(input.language ?? project.language).slice(0, 80), generation: repairGeneration(input.generation ?? project.generation), slides: normalizeSlides(input.slides ?? project.slides, project.slides) };
+      if (imageFormat(next.generation?.aspectRatio).ratio !== imageFormat(project.generation?.aspectRatio).ratio) next.slides = next.slides.map(slide => ({ ...slide, artworkAssetId: '', artworkReviewed: false, artworkReviewedAt: '' }));
       if (next.templateId !== project.templateId || next.language !== project.language) next.slides = next.slides.map(slide => ({ ...slide, approved: false, approvedAt: '', artworkAssetId: '', artworkReviewed: false, artworkReviewedAt: '' }));
       for (const key of ['id', 'clientId', 'revision', 'archived', 'businessPackId', 'businessPackVersion', 'recipeId', 'contextSnapshot', 'createdAt', 'updatedAt', 'expectedRevision']) delete next[key];
       const result = await env.DB.prepare('UPDATE projects SET project_json=?,revision=revision+1,updated_at=? WHERE account_id=? AND client_id=? AND id=? AND revision=?').bind(JSON.stringify(next), now(), accountId, clientId, projectId, project.revision).run();
