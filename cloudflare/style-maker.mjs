@@ -74,7 +74,7 @@ export async function renderStyleBoard(env, accountId, client, input, viewer) {
       if (mood) form.append('image[]', new Blob([mood.bytes], { type: mood.mime }), 'mood');
       const response = await fetch('https://api.openai.com/v1/images/edits', { method: 'POST', headers: { Authorization: `Bearer ${env.OPENAI_API_KEY}` }, body: form });
       if (!response.ok) throw fail(`Image provider rejected the request (${response.status}).`, 502);
-      result = findImage(await response.json());
+      result = findImage(await response.json()); if (result) result.mime = 'image/webp';
     } else {
       const images = [{ type: 'image', mime_type: customReference?.mime || 'image/png', data: imageBase64(referenceBytes) }];
       if (logo) images.push({ type: 'image', mime_type: logo.mime, data: imageBase64(logo.bytes) });
