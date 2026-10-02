@@ -1,0 +1,58 @@
+name: Deploy v4 to Cloudflare
+on:
+  push:
+    branches: [v4]
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: srshti-v4-cloudflare
+  cancel-in-progress: false
+jobs:
+  deploy:
+    if: github.ref == 'refs/heads/v4'
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - run: npm ci
+      - name: Syntax check V4
+        run: |
+          node --check web/v4-core.js
+          node --check web/v4-onboarding.js
+          node --check web/v4-app-views.js
+          node --check web/v4-flow.js
+          node --check web/v4-main.js
+          node --check cloudflare/v4.mjs
+          node --check cloudflare/worker.mjs
+      - run: npm test
+      - run: npm run cloudflare:check
+      - name: Create or reuse V4 Cloudflare resources
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          WORKER_NAME: ${{ vars.V4_WORKER_NAME || 'carousel-studio-v4' }}
+          D1_DATABASE_NAME: ${{ vars.V4_D1_DATABASE_NAME || 'carousel-studio-v4-db' }}
+          R2_BUCKET_NAME: ${{ vars.V4_R2_BUCKET_NAME || 'carousel-studio-v4-assets' }}
+          QUEUE_NAME: ${{ vars.V4_QUEUE_NAME || 'carousel-studio-v4-jobs' }}
+          DEAD_QUEUE_NAME: ${{ vars.V4_DEAD_QUEUE_NAME || 'carousel-studio-v4-dead' }}
+          APP_ORIGIN: ${{ vars.V4_APP_ORIGIN }}
+          ADMIN_EMAIL: ${{ vars.ADMIN_EMAIL }}
+        run: |
+          npm run cloudflare:prepare
+          npx --no-install wrangler d1 migrations apply DB --remote --config wrangler.generated.json
+      - name: Upload provider secrets and deploy Worker
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          GOOGLE_CLIENT_ID: ${{ secrets.GOOGLE_CLIENT_ID }}
+          GOOGLE_CLIENT_SECRET: ${{ secrets.GOOGLE_CLIENT_SECRET }}
+        run: npm run cloudflare:deploy
+      - name: Verify V4 cloud app
+        run: npm run cloudflare:smoke
