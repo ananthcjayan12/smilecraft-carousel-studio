@@ -73,7 +73,7 @@ async function start() { server = spawn(process.execPath, ['server/index.mjs'], 
 async function json(url, method = 'GET', body = undefined) { const r = await fetch(`${origin}${url}`, { method, headers: { 'Content-Type': 'application/json' }, body: body === undefined ? undefined : JSON.stringify(body) }); return { status: r.status, data: await r.json() }; }
 test('local server, project storage, input validation and unavailable AI gateway', async t => {
   await start(); t.after(() => server?.kill());
-  const page = await fetch(origin); assert.equal(page.status, 200); assert.match(await page.text(), /SmileCraft Studio/);
+  const page = await fetch(origin); assert.equal(page.status, 200); assert.match(await page.text(), /Srshti/);
   const status = await json('/api/status'); assert.equal(status.status, 200); assert.equal(typeof status.data.codexAvailable, 'boolean'); assert.equal(typeof status.data.codexAuthenticated, 'boolean'); assert.equal(typeof status.data.cli.codex.binary, 'string'); assert.equal(status.data.imageProviders.openai.available, false); assert.equal(typeof status.data.imageProviders.antigravity.available, 'boolean');
   if (status.data.textProviders.antigravity.available) { const catalog = await json('/api/models/agy'); assert.equal(catalog.status, 200); assert.ok(catalog.data.models.length > 0); }
   const invalid = await json('/api/projects', 'POST', { topic: 'demo', slides: [] }); assert.equal(invalid.status, 400);
