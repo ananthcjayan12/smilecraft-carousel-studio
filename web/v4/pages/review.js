@@ -6,9 +6,9 @@ let edit=false,editBrief=false,currentId='',currentItem=null;
 export async function render(state,params){
  const id=params.get('id');if(!id)return '<a class="btn" href="#/library">Back to content</a>';
  if(currentId!==id){edit=false;editBrief=false;currentId=id;state.frame=0;}
- const data=await api(`/content/${id}`),item=data.item;currentItem=item;state.reviewItem=item;state.contentJobs=data.jobs;
+ const data=await api(`/content/${id}`,{cache:false}),item=data.item;currentItem=item;state.reviewItem=item;state.contentJobs=data.jobs;
  if(state.clinic?.id!==item.clinic_id){state.clinic=state.bootstrap.clinics.find(c=>c.id===item.clinic_id);await refreshClinic();}
- if(item.week_id&&state.week?.id!==item.week_id)state.week=(await api(`/weeks/${item.week_id}`)).week;
+
  const frame=item.frames[Math.min(state.frame,item.frames.length-1)],ready=item.frames.length>0&&item.frames.every(f=>f.assetId),working=['briefing','writing','validating','generating'].includes(item.status),copyReady=item.copy_status==='validated',copyApproved=item.copy_status==='approved',back=item.week_id?'#/week':'#/library';
  const heading=title(typeLabel(item).toUpperCase(),item.topic||'Your custom content',`${item.week_id?'Weekly content':'Standalone content'} · ${item.language}`,status(item));
  const briefForm=editBrief?`<form class="panel" data-form="brief"><h2>Your topic & instructions</h2>${field('Topic','topic',item.topic)}${area('Additional instructions (optional)','customBrief',item.brief.sourceSummary||'','Include your own message and accurate details. Rewriting a brief prepares new copy for review.')}${styleField(state,item.style_id)}${contactFields(state.clinic,item.brief.contactKeys)}<div class="form-actions"><button type="button" class="btn" data-action="cancel-brief">Cancel</button><button type="submit" class="btn primary">Save & prepare content</button></div></form>`:'';
@@ -24,7 +24,7 @@ export async function action(name,el,state){const item=currentItem;
  if(name==='edit'||name==='cancel-edit'){edit=name==='edit';editBrief=false;go(`/review?id=${currentId}`);return;}
  if(name==='edit-brief'||name==='cancel-brief'){editBrief=name==='edit-brief';edit=false;go(`/review?id=${currentId}`);return;}
  if(name==='copy-caption'){await navigator.clipboard.writeText(item.caption);toast('Caption copied.');return;}
- if(name==='download'){const {downloadPack}=await import('../export.js');await downloadPack([item],state.clinic,item.week_id?state.week.week_start:item.created_at.slice(0,10));return;}
+ if(name==='download'){if(item.week_id&&state.week?.id!==item.week_id)state.week=(await api(`/weeks/${item.week_id}`)).week;const {downloadPack}=await import('../export.js');await downloadPack([item],state.clinic,item.week_id?state.week.week_start:item.created_at.slice(0,10));return;}
  const endpoint={publish:'publish',write:'write','approve-copy':'approve-copy',approve:'approve',generate:'generate','cancel-generation':'cancel'}[name];
  if(endpoint){await api(`/content/${currentId}/${endpoint}`,{method:'POST',body:{}});edit=false;editBrief=false;if(item.week_id)await refreshWeek();go(`/review?id=${currentId}`);}
 }

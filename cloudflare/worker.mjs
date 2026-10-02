@@ -18,7 +18,10 @@ export default {
         if (auth) return auth;
       }
       const viewer = await session(request, env);
+      const isAdmin=Boolean(viewer&&env.ADMIN_EMAIL&&viewer.email.toLowerCase()===env.ADMIN_EMAIL.toLowerCase());
+      if(path==='/legacy.html'&&!isAdmin)return json({error:'Administrator access required.'},403);
       if (path.startsWith('/api/companion/')) {
+        if(!isAdmin)return json({error:'Advanced studio access is restricted to the administrator.'},403);
         if (viewer && !['GET','HEAD'].includes(request.method) && !mutationAllowed(request,env,viewer)) return json({error:'This request did not pass the session check.'},403);
         return companionRoute(request,env,viewer,url);
       }
@@ -27,8 +30,9 @@ export default {
       if (path.startsWith('/api/')) {
         if (!viewer) return json({ error: 'Sign in to continue.' }, 401);
         if (!['GET', 'HEAD'].includes(request.method) && !mutationAllowed(request, env, viewer)) return json({ error: 'This request did not pass the session check. Reload and retry.' }, 403);
-        if(path.startsWith('/api/v4/'))return cloudV4(env).route(request,viewer.account_id,url);
-        return apiRoute(request, env, viewer, url);
+        if(path.startsWith('/api/v4/'))return await cloudV4(env,{isAdmin:Boolean(env.ADMIN_EMAIL&&viewer.email.toLowerCase()===env.ADMIN_EMAIL.toLowerCase())}).route(request,viewer.account_id,url);
+        if(!isAdmin&&!['/api/me','/api/plans'].includes(path)&&!path.startsWith('/api/admin/'))return json({error:'Advanced studio access is restricted to the administrator.'},403);
+        return await apiRoute(request, env, viewer, url);
       }
       return env.STATIC.fetch(request);
     } catch (error) {

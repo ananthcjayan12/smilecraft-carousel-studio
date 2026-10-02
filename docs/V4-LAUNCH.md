@@ -78,3 +78,13 @@ The automated suite covers V3 regressions, source validation, account and clinic
 ## Manual review of the new flow
 
 Use Settings → Providers to save task choices, and Brand & styles to confirm language and contact details. Plan a week, customize any brief if needed, then select Create my week. Validated weekly drafts continue directly to artwork. Use Create content to make a standalone carousel, story or post; prepare its brief, write the draft, review the copy and approve it to create artwork. The Content library includes both kinds of content. Local startup applies migration 0011 automatically; cloud deployment must apply it to D1 before serving the updated Worker.
+
+## V5 cloud administration and performance
+
+Cloud users manage their clinic and content. Only the Google account matching `ADMIN_EMAIL` can open **Admin dashboard** (`#/admin`), read or save AI mappings, access Advanced Studio, or allocate client plans. Advanced Studio's HTML, legacy APIs and companion endpoints reject non-admin access. `/legacy.html` must stay in `assets.run_worker_first` so static hosting cannot bypass authorization.
+
+The dashboard saves one shared mapping for writing, validation, styles and artwork in `v4_provider_settings` under `studio-global`. Client-specific old mappings are ignored. Until a global mapping is saved, the configured administrator's previous mapping is used when available, then provider defaults. Already queued jobs retain their snapshots. Local workspaces keep their existing owner-managed settings.
+
+Client account choices display plan and available credits; allocations use the existing monthly, idempotent admin API. Configure `ADMIN_EMAIL` to your own Google sign-in address before deployment.
+
+Apply migration **0012** for polling, review and week-list indexes. Startup and independent database reads run in parallel, week data loads on demand, and library reads run together. Browser GET results are deduplicated and cached for 15 seconds; mutations invalidate them and progress requests bypass the cache. Cached views appear immediately during navigation, with loading feedback for new pages. Background polling uses only the current page's jobs and pauses requests while the tab is hidden. Font connections and common JavaScript modules are preloaded.

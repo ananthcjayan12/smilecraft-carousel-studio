@@ -60,13 +60,13 @@ export async function apiRoute(request, env, viewer, url) {
   const accountId = viewer.account_id, parts = url.pathname.split('/').filter(Boolean).map(decodeURIComponent), method = request.method;
   const body = async () => { const data = await request.json(); if (!data || typeof data !== 'object' || Array.isArray(data)) throw Object.assign(new Error('Expected a JSON object.'), { status: 400 }); return data; };
   if (url.pathname === '/api/me' && method === 'GET') {
-    const subscription = await first(env.DB, 'SELECT plan_id AS planId,period_start AS periodStart FROM subscriptions WHERE account_id=?', accountId);
-    return json({ user: { id: viewer.user_id, email: viewer.email }, account: { id: accountId, role: viewer.role }, plan: subscription || { planId: 'access' }, isAdmin: Boolean(env.ADMIN_EMAIL && viewer.email.toLowerCase() === env.ADMIN_EMAIL.toLowerCase()), csrf: viewer.csrf, credits: await balance(env, accountId), companionEnabled: Boolean((await first(env.DB,'SELECT companion_enabled FROM accounts WHERE id=?',accountId))?.companion_enabled) });
+    const [subscription,credits,account]=await Promise.all([first(env.DB,'SELECT plan_id AS planId,period_start AS periodStart FROM subscriptions WHERE account_id=?',accountId),balance(env,accountId),first(env.DB,'SELECT companion_enabled FROM accounts WHERE id=?',accountId)]);
+    return json({ user: { id: viewer.user_id, email: viewer.email }, account: { id: accountId, role: viewer.role }, plan: subscription || { planId: 'access' }, isAdmin: Boolean(env.ADMIN_EMAIL && viewer.email.toLowerCase() === env.ADMIN_EMAIL.toLowerCase()), csrf: viewer.csrf, credits, companionEnabled: Boolean(account?.companion_enabled) });
   }
   if (url.pathname === '/api/plans' && method === 'GET') return json({ plans: await all(env.DB, 'SELECT id,version,monthly_credits AS monthlyCredits FROM plans WHERE active=1 ORDER BY monthly_credits') });
   if (url.pathname === '/api/admin/accounts' && method === 'GET') {
     if (!env.ADMIN_EMAIL || viewer.email.toLowerCase() !== env.ADMIN_EMAIL.toLowerCase()) return bad('Not authorized.', 403);
-    const accounts = await all(env.DB, 'SELECT a.id,a.name,u.email,s.plan_id AS planId,a.companion_enabled AS companionEnabled FROM accounts a JOIN memberships m ON m.account_id=a.id AND m.role=\'owner\' JOIN users u ON u.id=m.user_id LEFT JOIN subscriptions s ON s.account_id=a.id ORDER BY a.created_at DESC LIMIT 500');
+    const accounts = await all(env.DB, `SELECT a.id,a.name,u.email,s.plan_id AS planId,a.companion_enabled AS companionEnabled,COALESCE((SELECT SUM(l.amount) FROM credit_ledger l WHERE l.account_id=a.id AND (l.expires_at IS NULL OR l.expires_at>datetime('now'))),0)-COALESCE((SELECT SUM(r.amount) FROM credit_reservations r WHERE r.account_id=a.id AND r.status='reserved'),0) AS credits FROM accounts a JOIN memberships m ON m.account_id=a.id AND m.role='owner' JOIN users u ON u.id=m.user_id LEFT JOIN subscriptions s ON s.account_id=a.id ORDER BY a.created_at DESC LIMIT 500`);
     return json({ accounts });
   }
   if (parts[0] === 'api' && parts[1] === 'admin' && parts[2] === 'accounts' && parts[3] && parts[4] === 'allocate' && method === 'POST') {

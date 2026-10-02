@@ -1,6 +1,6 @@
 import {api} from '../api.js';
 import {esc,attr,title,thumb,status,typeLabel,retryJobs} from '../ui.js';
-import {go,toast} from '../app.js';
+import {go,toast,ensureWeek} from '../app.js';
 
 export function itemCard(item,working=false,showControls=true){
  const ready=item.frames.length>0&&item.frames.every(f=>f.assetId),skipped=item.status==='skipped';
@@ -10,6 +10,7 @@ export function itemCard(item,working=false,showControls=true){
  return `<article class="content-card ${skipped?'is-skipped':''}"><a class="content-art ${item.type}" href="#/review?id=${item.id}" aria-label="Review ${attr(item.topic)}">${thumb(item)}<span class="art-type">${esc(typeLabel(item))}</span></a><div class="content-info"><div class="card-status">${status(item)}<small>${item.angle?esc(item.angle):'Knowledge base selection'}</small></div><h3>${esc(item.brief?.sourceTopic||item.topic||'Your content')}</h3><p>${esc(item.brief?.sourceSummary||facts[0]||item.brief?.summary||'Review this source topic before preparing its brief.')}</p>${facts.length?`<details><summary>Knowledge base facts (${item.brief.facts.length})</summary>${facts.map(f=>`<p class="small-copy">${esc(f)}</p>`).join('')}</details>`:''}<a class="btn ${ready?'primary':''} small full" href="#/review?id=${item.id}">${ready?'Review artwork →':item.frames.length?'Review copy →':item.brief?.prepared?'Prepare content →':'Review topic →'}</a>${artworkControl}${showControls&&item.week_id?`<button class="btn small full spaced" data-action="change-topic" data-id="${item.id}" ${working?'disabled':''}>Change topic ↻</button><div class="two-col spaced"><button class="btn small" data-action="restart-item" data-id="${item.id}" data-stage="${!item.brief?.prepared?'brief':item.copy_status==='rejected'||!item.frames.length?'writing':'images'}" ${working?'disabled':''}>Restart</button>${skipped?'<span></span>':`<button class="btn small" data-action="skip-item" data-id="${item.id}">Skip</button>`}</div>`:''}</div></article>`
 }
 export async function render(state){
+ await ensureWeek();
  const c=state.clinic,create='<a class="btn" href="#/create">Create content +</a>';
  if(!c)return `<div class="empty-state"><h1>Let’s set up your clinic.</h1><a class="btn primary" href="#/setup">Set up my clinic →</a></div>`;
  if(c.status!=='active')return `${title('YOUR FIRST WEEK','Your clinic comes first.','Confirm your details and choose a style.')}<a class="btn primary" href="#/setup?step=profile">Continue setup →</a>`;

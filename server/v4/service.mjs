@@ -32,7 +32,8 @@ export function createV4Service(platform){
  const content=async(account,itemId)=>{const c=viewContent(await first('SELECT * FROM v4_content WHERE account_id=? AND id=?',account,itemId));if(!c)throw fail('Content not found.',404);c.published=Boolean(await first("SELECT id FROM v4_usage WHERE account_id=? AND content_id=? AND status='published' AND knowledge_card_id=? AND headline=? LIMIT 1",account,itemId,c.knowledge_card_id,c.topic));return c;};
  async function providerSettings(account,refresh=false){
   const catalog=platform.providerCatalog?await platform.providerCatalog(refresh):{};
-  const stored=parse((await first('SELECT tasks_json FROM v4_provider_settings WHERE account_id=?',account))?.tasks_json);
+  const storedRow=await first('SELECT tasks_json FROM v4_provider_settings WHERE account_id=?',platform.providerSettingsAccount||account);
+  const stored=parse((storedRow||await platform.legacyProviderSettings?.())?.tasks_json);
   const legacy=platform.snapshotGeneration?.();const tasks={};
   for(const task of Object.keys(TASKS)){
    const kind=['style','artwork'].includes(task)?'models':'writingModels';
@@ -58,7 +59,7 @@ export function createV4Service(platform){
   try{await platform.enqueue(jobId);}catch{await run("UPDATE v4_jobs SET status='failed',error=? WHERE id=?",'Could not queue work. Retry this task.',jobId);}
   return first('SELECT * FROM v4_jobs WHERE id=?',jobId);
  }
- async function getContent(account,itemId){const item=await content(account,itemId);return {item,jobs:await all('SELECT id,kind,status,progress,error FROM v4_jobs WHERE account_id=? AND content_id=? ORDER BY created_at DESC',account,itemId)};}
+ async function getContent(account,itemId){const [item,jobs]=await Promise.all([content(account,itemId),all('SELECT id,kind,status,progress,error FROM v4_jobs WHERE account_id=? AND content_id=? ORDER BY created_at DESC',account,itemId)]);return {item,jobs};}
  async function styleFor(account,c,item){const style=await first("SELECT * FROM v4_styles WHERE id=? AND clinic_id=? AND account_id=? AND status='ready'",item.style_id,c.id,account);if(!style)throw fail('Choose a ready style from this clinic.');return style;}
  async function referenceFor(account,c,style){const asset=await first('SELECT * FROM v4_assets WHERE id=? AND account_id=? AND clinic_id=?',style.asset_id,account,c.id);const reference=asset&&await platform.readImage(asset.original_key);if(!reference)throw fail('The selected template reference is unavailable.');return reference;}
  async function updateWeek(account,weekId){
@@ -72,11 +73,11 @@ export function createV4Service(platform){
   try{const saved=await platform.saveImage(account,clinicId,image),assetId=id();
   await run('INSERT INTO v4_assets(id,account_id,clinic_id,mime,original_key,preview_key,thumbnail_key,width,height,size,created_at) VALUES(?,?,?,?,?,?,?,?,?,?,?)',assetId,account,clinicId,saved.mime,saved.originalKey,saved.previewKey,saved.thumbnailKey,saved.width||null,saved.height||null,saved.size,now());return assetId;}catch(error){await platform.refundImage?.(account,image);throw error;}
  }
- async function styles(account,clinicId){await clinic(account,clinicId);return all('SELECT id,reference_id,name,asset_id,status FROM v4_styles WHERE account_id=? AND clinic_id=? AND status!=? ORDER BY created_at',account,clinicId,'deleted');}
+ async function styles(account,clinicId){return all('SELECT id,reference_id,name,asset_id,status FROM v4_styles WHERE account_id=? AND clinic_id=? AND status!=? ORDER BY created_at',account,clinicId,'deleted');}
  async function getWeek(account,weekId){
   const week=await first('SELECT * FROM v4_weeks WHERE account_id=? AND id=?',account,weekId);if(!week)throw fail('Week not found.',404);
-  const items=(await all('SELECT * FROM v4_content WHERE account_id=? AND week_id=? ORDER BY position',account,weekId)).map(viewContent);
-  const jobs=await all('SELECT id,kind,content_id,status,progress,error,priority FROM v4_jobs WHERE account_id=? AND week_id=? ORDER BY priority,created_at',account,weekId);
+  const [rows,jobs]=await Promise.all([all('SELECT * FROM v4_content WHERE account_id=? AND week_id=? ORDER BY position',account,weekId),all('SELECT id,kind,content_id,status,progress,error,priority FROM v4_jobs WHERE account_id=? AND week_id=? ORDER BY priority,created_at',account,weekId)]);
+  const items=rows.map(viewContent);
   const active=items.filter(i=>i.status!=='skipped'),ready=active.filter(i=>i.frames.length>0&&i.frames.every(f=>f.assetId)).length;
   return {week:{...week,items,jobs,ready,total:active.length,itemCount:items.length,heroReady:Boolean(items[0]?.status!=='skipped'&&items[0]?.frames.length&&items[0].frames.every(f=>f.assetId))}};
  }
@@ -260,12 +261,13 @@ export function createV4Service(platform){
   const parts=url.pathname.slice('/api/v4'.length).split('/').filter(Boolean),method=request.method;
   const body=async()=>{const raw=await request.text();if(raw.length>65000)throw fail('Request too large.',413);let input;try{input=JSON.parse(raw)}catch{throw fail('Invalid JSON.');}if(!input||typeof input!=='object'||Array.isArray(input))throw fail('Expected an object.');return input;};
   const json=data=>Response.json(data,{headers:{'Cache-Control':'no-store'}});
-  if(parts[0]==='bootstrap'&&method==='GET')return json({clinics:(await all('SELECT * FROM v4_clinics WHERE account_id=? ORDER BY updated_at DESC',account)).map(viewClinic),activation:await platform.activation(account),capabilities:platform.capabilities});
+  if(parts[0]==='bootstrap'&&method==='GET'){const [rows,activation]=await Promise.all([all('SELECT * FROM v4_clinics WHERE account_id=? ORDER BY updated_at DESC',account),platform.activation(account)]);return json({clinics:rows.map(viewClinic),activation,capabilities:platform.capabilities});}
   if(parts[0]==='local-providers'&&parts.length===1&&platform.localProviders){
    if(method==='GET')return json(await platform.localProviders.status({refresh:url.searchParams.get('refresh')==='1'}));
    if(method==='PUT')return json(await platform.localProviders.save(await body()));
   }
   if(parts[0]==='providers'&&parts.length===1){
+   await platform.authorizeProviderSettings?.();
    if(method==='GET')return json(await providerSettings(account,url.searchParams.get('refresh')==='1'));
    if(method==='PUT'){
     const input=await body(),catalog=(await providerSettings(account,true)).providers,tasks={};
@@ -274,7 +276,7 @@ export function createV4Service(platform){
      if(!entry?.available||!entry[kind]?.some(([id])=>id===choice.model))throw fail(`Choose an available provider and supported model for ${TASKS[task]}.`);
      tasks[task]={provider:choice.provider,model:choice.model,...(['style','artwork'].includes(task)?normalizeImageOptions(choice):{})};
     }
-    await run('INSERT INTO v4_provider_settings(account_id,tasks_json,updated_at) VALUES(?,?,?) ON CONFLICT(account_id) DO UPDATE SET tasks_json=excluded.tasks_json,revision=revision+1,updated_at=excluded.updated_at',account,JSON.stringify(tasks),now());return json(await providerSettings(account));
+    await run('INSERT INTO v4_provider_settings(account_id,tasks_json,updated_at) VALUES(?,?,?) ON CONFLICT(account_id) DO UPDATE SET tasks_json=excluded.tasks_json,revision=revision+1,updated_at=excluded.updated_at',platform.providerSettingsAccount||account,JSON.stringify(tasks),now());return json(await providerSettings(account));
    }
   }
   if(parts[0]==='knowledge'&&method==='GET')return json({cards:KNOWLEDGE_CARDS});
@@ -286,7 +288,7 @@ export function createV4Service(platform){
   }
   if(parts[0]==='clinics'&&parts[1]){
    const c=await clinic(account,parts[1]);
-   if(parts.length===2&&method==='GET')return json({clinic:c,styles:await styles(account,c.id),jobs:await all("SELECT id,kind,status,progress,error FROM v4_jobs j WHERE account_id=? AND clinic_id=? AND (status!='cancelled' OR (kind='style' AND EXISTS(SELECT 1 FROM v4_styles s WHERE s.id=json_extract(j.input_json,'$.styleId') AND s.status='cancelled'))) ORDER BY created_at DESC LIMIT 30",account,c.id)});
+   if(parts.length===2&&method==='GET'){const [available,jobs]=await Promise.all([styles(account,c.id),all("SELECT id,kind,status,progress,error FROM v4_jobs j WHERE account_id=? AND clinic_id=? AND (status!='cancelled' OR (kind='style' AND EXISTS(SELECT 1 FROM v4_styles s WHERE s.id=json_extract(j.input_json,'$.styleId') AND s.status='cancelled'))) ORDER BY created_at DESC LIMIT 30",account,c.id)]);return json({clinic:c,styles:available,jobs});}
    if(parts[2]==='profile'&&method==='PUT'){
     const input=await body();if(Number(input.revision)!==c.revision)throw fail('Clinic details changed. Reload before saving.',409);
     const profile={...c.profile,goal:text(input.goal||c.profile.goal),emphasis:text(input.emphasis||c.profile.emphasis),location:text(input.location??c.profile.location),services:Array.isArray(input.services)?input.services.map(s=>text(s,80)).slice(0,20):c.profile.services,tone:text(input.tone||c.profile.tone),language:text(input.language??c.profile.language??'English',120)||'English',confirmed:Boolean(input.confirmed||c.profile.confirmed),facts:Array.isArray(input.facts)?input.facts.map(f=>({text:text(f.text,400),status:input.confirmed?'verified':'unverified',source:text(f.source,500)})).slice(0,20):c.profile.facts};
