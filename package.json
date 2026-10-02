@@ -1,9 +1,9 @@
 {
   "name": "smilecraft-carousel-studio",
   "private": true,
-  "version": "3.0.0-alpha.1",
+  "version": "4.0.0-alpha.1",
   "type": "module",
-  "description": "Web-only multi-business carousel studio",
+  "description": "Srshti weekly content studio for clinics",
   "scripts": {
     "start": "node server/index.mjs",
     "dev": "node --watch server/index.mjs",
