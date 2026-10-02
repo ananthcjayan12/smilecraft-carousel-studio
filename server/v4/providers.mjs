@@ -1,6 +1,6 @@
 import {readFileSync} from 'node:fs';
 import {writeFile,rename} from 'node:fs/promises';
-import {tmpdir} from 'node:os';
+import {tmpdir,homedir} from 'node:os';
 import {join} from 'node:path';
 import {inspectCli,inspectCliAsync} from '../cli-tools.mjs';
 import {availableAgyModels} from '../text-providers.mjs';
@@ -11,7 +11,16 @@ const STALE_MS=60000;
 const safeModelId=value=>/^[a-z0-9][a-z0-9._:/-]{0,99}$/i.test(value);
 // Saved before agy agent models were selectable; those ids name the image tool's model, not an agy model.
 const legacyAgyImageModel=value=>/-image$/.test(value);
-export function createLocalProviders({storageRoot,env=process.env,inspect=inspectCli,inspectAsync,listAgyModels}){
+export function readCodexModels(env=process.env) {
+ try {
+  const cache=JSON.parse(readFileSync(join(env.CODEX_HOME||join(homedir(),'.codex'),'models_cache.json'),'utf8'));
+  const models=(cache.models||[]).filter(m=>m.visibility==='list'&&safeModelId(m.slug));
+  const images=models.map(m=>[m.slug,m.display_name||m.slug]);
+  const writing=models.flatMap(m=>[[m.slug,m.display_name||m.slug],...(m.supported_reasoning_levels||[]).filter(l=>/^(low|medium|high|xhigh|max|ultra)$/.test(l.effort)).map(l=>[`${m.slug}::${l.effort}`,`${m.display_name||m.slug} (${l.effort})`])]);
+  return images.length?{models:images,writingModels:writing}:null;
+ }catch{return null;}
+}
+export function createLocalProviders({storageRoot,env=process.env,inspect=inspectCli,inspectAsync,listAgyModels,listCodexModels=()=>readCodexModels(env)}){
  const file=join(storageRoot,'local-generation.json');
  inspectAsync??=inspect===inspectCli?inspectCliAsync:async(...args)=>inspect(...args);
  listAgyModels??=async bin=>(await availableAgyModels(bin,{cwd:tmpdir(),timeoutMs:30000})).map(m=>[m.id,m.label]);
@@ -21,8 +30,9 @@ export function createLocalProviders({storageRoot,env=process.env,inspect=inspec
  function build(codex,agy){
   if(codex.installed)env.CODEX_BIN=codex.binary;
   if(agy.installed)env.AGY_BIN=agy.binary;
+  const codexCatalog=listCodexModels();
   return {
-   codex:{label:'Codex CLI',available:codex.installed&&codex.authenticated,detail:!codex.installed?'Install Codex CLI.':!codex.authenticated?'Run codex login, then refresh.':codex.version,models:IMAGE_MODELS.codex},
+   codex:{label:'Codex CLI',available:codex.installed&&codex.authenticated,detail:!codex.installed?'Install Codex CLI.':!codex.authenticated?'Run codex login, then refresh.':codex.version,models:codexCatalog?[...codexCatalog.models,['imagegen','Codex default']]:IMAGE_MODELS.codex,writingModels:codexCatalog?.writingModels||WRITING_MODELS.codex},
    antigravity:{label:'Antigravity CLI (agy)',available:agy.installed,detail:agy.installed?`${agy.version} · ${agyModels?'The selected agy model directs native image generation.':'Loading agy models…'}`:'Install and sign in to the agy CLI, then refresh.',models:agyModels||WRITING_MODELS.antigravity,modelsLoaded:Boolean(agyModels)},
    claude:{label:'Claude API',available:Boolean(env.ANTHROPIC_API_KEY),detail:env.ANTHROPIC_API_KEY?'Server key configured.':'Set ANTHROPIC_API_KEY in .env.',models:[],writingModels:WRITING_MODELS.claude},
    openai:{label:'OpenAI API',available:Boolean(env.OPENAI_API_KEY),detail:env.OPENAI_API_KEY?'Server key configured.':'Set OPENAI_API_KEY in .env.',models:IMAGE_MODELS.openai},
@@ -58,14 +68,14 @@ export function createLocalProviders({storageRoot,env=process.env,inspect=inspec
   async status({refresh:force=false}={}){
    if(force)await Promise.all([refresh(),loadAgyModels(true)]);
    else if(Date.now()-checkedAt>STALE_MS)void refresh().catch(()=>{});
-   return {selection:{...selection},providers:Object.fromEntries(Object.entries(cached).map(([id,p])=>[id,{...p,writingModels:id==='antigravity'?p.models:WRITING_MODELS[id]||[]}]))};
+   return {selection:{...selection},providers:Object.fromEntries(Object.entries(cached).map(([id,p])=>[id,{...p,writingModels:id==='antigravity'?p.models:p.writingModels||WRITING_MODELS[id]||[]}]))};
   },
   async save(input){
    const next={provider:String(input.provider||''),model:String(input.model||'')};
    if(cached[next.provider]&&!cached[next.provider].available)await refresh();
    requireReady(next);
    const temporary=`${file}.${crypto.randomUUID()}.tmp`;await writeFile(temporary,JSON.stringify(next,null,2)+'\n',{mode:0o600});await rename(temporary,file);selection=next;
-   return {selection:{...selection},providers:Object.fromEntries(Object.entries(cached).map(([id,p])=>[id,{...p,writingModels:id==='antigravity'?p.models:WRITING_MODELS[id]||[]}]))};
+   return {selection:{...selection},providers:Object.fromEntries(Object.entries(cached).map(([id,p])=>[id,{...p,writingModels:id==='antigravity'?p.models:p.writingModels||WRITING_MODELS[id]||[]}]))};
   },
  };
 }

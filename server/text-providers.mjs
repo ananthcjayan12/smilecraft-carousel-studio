@@ -1,3 +1,4 @@
+import {textModelSettings} from '../web/provider-models.js';
 import { spawn } from 'node:child_process';
 import { mkdir, writeFile } from 'node:fs/promises';
 import path from 'node:path';
@@ -97,11 +98,13 @@ export async function runTextProvider(task, payload) {
     if (provider === 'openai') {
       if (!process.env.OPENAI_API_KEY) throw Object.assign(new Error('OpenAI API key is missing. Set OPENAI_API_KEY before starting the server.'), { status: 409 });
       if (!model) throw new Error('Choose an OpenAI text model.');
-      envelope = await requestJson('OpenAI', 'https://api.openai.com/v1/chat/completions', { method: 'POST', headers: { Authorization: `Bearer ${process.env.OPENAI_API_KEY}`, 'Content-Type': 'application/json' }, body: JSON.stringify({ model, messages: [{ role: 'user', content: jsonPrompt }], response_format: { type: 'json_schema', json_schema: { name: 'carousel_content', strict: true, schema } } }) }); raw = envelope.choices?.[0]?.message?.content || '';
+      const settings = textModelSettings(provider, model);
+      envelope = await requestJson('OpenAI', 'https://api.openai.com/v1/chat/completions', { method: 'POST', headers: { Authorization: `Bearer ${process.env.OPENAI_API_KEY}`, 'Content-Type': 'application/json' }, body: JSON.stringify({ model: settings.model, ...(settings.reasoningEffort ? { reasoning_effort: settings.reasoningEffort } : {}), messages: [{ role: 'user', content: jsonPrompt }], response_format: { type: 'json_schema', json_schema: { name: 'carousel_content', strict: true, schema } } }) }); raw = envelope.choices?.[0]?.message?.content || '';
     } else if (provider === 'gemini') {
       if (!process.env.GEMINI_API_KEY) throw Object.assign(new Error('Gemini API key is missing. Set GEMINI_API_KEY before starting the server.'), { status: 409 });
       if (!model) throw new Error('Choose a Gemini text model.');
-      envelope = await requestJson('Gemini', `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`, { method: 'POST', headers: { 'x-goog-api-key': process.env.GEMINI_API_KEY, 'Content-Type': 'application/json' }, body: JSON.stringify({ contents: [{ parts: [{ text: jsonPrompt }] }], generationConfig: { responseMimeType: 'application/json' } }) }); raw = extractText(envelope.candidates?.[0]?.content?.parts);
+      const settings = textModelSettings(provider, model);
+      envelope = await requestJson('Gemini', `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(settings.model)}:generateContent`, { method: 'POST', headers: { 'x-goog-api-key': process.env.GEMINI_API_KEY, 'Content-Type': 'application/json' }, body: JSON.stringify({ contents: [{ parts: [{ text: jsonPrompt }] }], generationConfig: { responseMimeType: 'application/json', ...(settings.thinkingConfig ? { thinkingConfig: settings.thinkingConfig } : {}) } }) }); raw = extractText(envelope.candidates?.[0]?.content?.parts);
     } else if (provider === 'claude') {
       if (!process.env.ANTHROPIC_API_KEY) throw Object.assign(new Error('Claude API key is missing. Set ANTHROPIC_API_KEY before starting the server.'), { status: 409 });
       if (!model) throw new Error('Choose a Claude text model.');

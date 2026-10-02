@@ -17,3 +17,18 @@ test('V3 based prompts follow arbitrary language combinations and full approved 
  const frame={position:1,heading:'Sunday opening',body:'a'.repeat(400),visualPrompt:'Editorial clinic illustration',contacts:item.context.business.contacts};item.frames=[frame];
  const writing=writingPrompt(clinic,item,{name:'Clinical white'});assert.match(writing,/Hindi \+ English/);assert.doesNotMatch(writing,/Write clear natural English/);assert.match(writing,/exactly ONE complete post frame/);assert.doesNotMatch(writing,/exactly five coordinated slides/);const image=artworkPrompt(clinic,item,frame);assert.ok(image.includes('BODY: '+JSON.stringify(frame.body)));assert.match(image,/post frame 1 of 1/);assert.match(image,/1234567890/);assert.match(stylePrompt(clinic,'clinical-white'),/senior brand and editorial designer/);
 });
+
+for(const [provider,model,base,effort] of [
+ ['gemini','gemini-3.8-flash-low','gemini-3.8-flash','low'],
+ ['gemini','gemini-3.8-flash-high','gemini-3.8-flash','high'],
+ ['gemini','gemini-3.1-pro-medium','gemini-3.1-pro','medium'],
+ ['openai','gpt-5.6-sol::none','gpt-5.6-sol','none'],
+ ['openai','gpt-5.6-terra::max','gpt-5.6-terra','max'],
+])test(`${provider} ${model} sends the selected reasoning level with the base model`,async()=>{
+ let request;
+ const schema={type:'object',properties:{text:{type:'string'}},required:['text']};
+ const fetcher=async(url,options)=>{request={url,body:JSON.parse(options.body)};return Response.json(provider==='openai'?{choices:[{message:{content:'{"text":"done"}'}}]}:{candidates:[{content:{parts:[{text:'{"text":"done"}'}]}}]});};
+ await apiStructured({provider,model,prompt:'Test',schema,env:{OPENAI_API_KEY:'test',GEMINI_API_KEY:'test'},fetcher});
+ if(provider==='gemini'){assert.ok(request.url.endsWith(`/models/${base}:generateContent`));assert.deepEqual(request.body.generationConfig.thinkingConfig,{thinkingLevel:effort});}
+ else{assert.equal(request.body.model,base);assert.equal(request.body.reasoning_effort,effort);}
+});

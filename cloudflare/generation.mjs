@@ -1,5 +1,5 @@
 import { imageFormat, openaiImageSize } from '../web/image-formats.js';
-import { compatibleModel, IMAGE_MODELS, WRITING_MODELS } from '../web/provider-models.js';
+import { compatibleModel, IMAGE_MODELS, WRITING_MODELS, textModelSettings } from '../web/provider-models.js';
 import { getProject, assetBytes, saveAsset, builtinTemplate } from './studio.mjs';
 import { buildV1WritingPrompt, buildV1ImagePrompt } from './prompts.mjs';
 
@@ -107,10 +107,12 @@ async function generateText(env, job, project, request) {
   const prompt = buildV1WritingPrompt(revision ? 'revise' : 'draft', { contextSnapshot: { ...context, language: project.language }, topic: project.topic, notes: project.notes, slide: revision ? project.slides[job.slide_index] : undefined, correction: job.correction, referenceContext: project.templateId ? { id: project.templateId } : null });
   let raw;
   if (job.provider === 'openai') {
-    const data = await request('https://api.openai.com/v1/chat/completions', { method: 'POST', headers: { Authorization: `Bearer ${env.OPENAI_API_KEY}`, 'Content-Type': 'application/json' }, body: JSON.stringify({ model: job.model_id, messages: [{ role: 'user', content: prompt }], response_format: { type: 'json_object' } }) });
+    const settings = textModelSettings('openai', job.model_id);
+    const data = await request('https://api.openai.com/v1/chat/completions', { method: 'POST', headers: { Authorization: `Bearer ${env.OPENAI_API_KEY}`, 'Content-Type': 'application/json' }, body: JSON.stringify({ model: settings.model, ...(settings.reasoningEffort ? { reasoning_effort: settings.reasoningEffort } : {}), messages: [{ role: 'user', content: prompt }], response_format: { type: 'json_object' } }) });
     raw = data.choices?.[0]?.message?.content;
   } else {
-    const data = await request(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(job.model_id)}:generateContent`, { method: 'POST', headers: { 'x-goog-api-key': env.GEMINI_API_KEY, 'Content-Type': 'application/json' }, body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }], generationConfig: { responseMimeType: 'application/json' } }) });
+    const settings = textModelSettings('gemini', job.model_id);
+    const data = await request(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(settings.model)}:generateContent`, { method: 'POST', headers: { 'x-goog-api-key': env.GEMINI_API_KEY, 'Content-Type': 'application/json' }, body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }], generationConfig: { responseMimeType: 'application/json', ...(settings.thinkingConfig ? { thinkingConfig: settings.thinkingConfig } : {}) } }) });
     raw = data.candidates?.[0]?.content?.parts?.map(part => part.text || '').join('');
   }
   const result = parseJson(raw);

@@ -16,7 +16,7 @@ test('Local provider choices persist, validate readiness and preserve queued sna
   let loggedIn=false;const env={};const inspect=name=>({installed:true,authenticated:name==='codex'?loggedIn:true,binary:name,version:'mock-cli'});
   let releaseModels;const modelsReady=new Promise(resolve=>{releaseModels=resolve});
   const listAgyModels=async()=>{await modelsReady;return [['gemini-3.8-flash-high','Gemini 3.8 Flash (High)'],['claude-sonnet-4-6','Claude Sonnet 4.6']];};
-  let p=createLocalProviders({storageRoot,env,inspect,listAgyModels});assert.equal(p.selected().provider,'antigravity');
+  let p=createLocalProviders({storageRoot,env,inspect,listAgyModels,listCodexModels:()=>null});assert.equal(p.selected().provider,'antigravity');
   assert.equal(p.selected().model,'gemini-3.8-flash-high');
   let status=await p.status();assert.equal(status.providers.antigravity.modelsLoaded,false);
   assert.deepEqual(status.providers.codex.models.map(([id])=>id),['gpt-5.6-sol','gpt-5.6-terra','gpt-5.6-luna','imagegen']);
@@ -26,9 +26,9 @@ test('Local provider choices persist, validate readiness and preserve queued sna
   assert.deepEqual(status.providers.antigravity.models.map(([id])=>id),['gemini-3.8-flash-high','claude-sonnet-4-6']);
   await assert.rejects(p.save({provider:'antigravity',model:'not-an-agy-model'}),/supported image model/);
   await p.save({provider:'antigravity',model:'claude-sonnet-4-6'});assert.equal(queued.provider,'codex');assert.equal(queued.model,'gpt-5.6-luna');
-  p=createLocalProviders({storageRoot,env,inspect,listAgyModels});assert.deepEqual(p.selected(),{provider:'antigravity',model:'claude-sonnet-4-6'});
+  p=createLocalProviders({storageRoot,env,inspect,listAgyModels,listCodexModels:()=>null});assert.deepEqual(p.selected(),{provider:'antigravity',model:'claude-sonnet-4-6'});
   await writeFile(join(storageRoot,'local-generation.json'),JSON.stringify({provider:'antigravity',model:'gemini-3.1-flash-image'}));
-  p=createLocalProviders({storageRoot,env,inspect,listAgyModels});assert.equal(p.selected().model,'gemini-3.8-flash-high');
+  p=createLocalProviders({storageRoot,env,inspect,listAgyModels,listCodexModels:()=>null});assert.equal(p.selected().model,'gemini-3.8-flash-high');
   await assert.rejects(p.save({provider:'unknown',model:'x'}),/supported/);
   await assert.rejects(p.save({provider:'codex',model:'unknown'}),/supported image model/);
   assert.equal(JSON.parse(await readFile(join(storageRoot,'local-generation.json'),'utf8')).provider,'antigravity');

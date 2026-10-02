@@ -1,3 +1,4 @@
+import {codexTextModelArgs} from '../../web/provider-models.js';
 import {spawn} from 'node:child_process';
 import {mkdtemp,readFile,writeFile,rm} from 'node:fs/promises';
 import {join} from 'node:path';
@@ -25,7 +26,7 @@ export async function localStructured(input){
   let image='';if(input.reference){image=join(directory,'template-reference.'+(input.reference.mime==='image/jpeg'?'jpg':input.reference.mime==='image/webp'?'webp':'png'));await writeFile(image,Buffer.from(input.reference.bytes));}
   let parsed;
   if(input.provider==='codex'){
-   const args=['exec','--skip-git-repo-check','--sandbox','read-only','--ephemeral','--model',input.model,'--output-schema',schemaFile,'--output-last-message',output,...(image?['--image',image]:[]),'-'];
+   const args=['exec','--skip-git-repo-check','--sandbox','read-only','--ephemeral',...codexTextModelArgs(input.model),'--output-schema',schemaFile,'--output-last-message',output,...(image?['--image',image]:[]),'-'];
    const raw=await command(process.env.CODEX_BIN||'codex',args,{cwd:directory,input:input.prompt,signal:input.signal});parsed=parseStructured(await readFile(output,'utf8').catch(()=>raw));
   }else{
    const prompt=`Return only the JSON object matching the schema. Do not browse, run commands, inspect credentials or unrelated files. ${image?`Inspect ONLY the supplied design reference image at ${image} to guide layout and copy density. Read-only image inspection is the only permitted tool action.`:'Do not call tools.'}\n${input.prompt}`;

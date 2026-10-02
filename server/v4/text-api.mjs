@@ -1,3 +1,4 @@
+import {textModelSettings} from '../../web/provider-models.js';
 const b64=bytes=>{let value='';for(let i=0;i<bytes.length;i+=8192)value+=String.fromCharCode(...bytes.subarray(i,i+8192));return btoa(value)};
 export function parseStructured(value){
  if(value&&typeof value==='object'&&!Array.isArray(value))return value;
@@ -12,17 +13,18 @@ export function assertSchema(value,schema){
  return value;
 }
 export async function apiStructured({provider,model,prompt,schema,reference,signal,env,fetcher=fetch}){
+ const settings=textModelSettings(provider,model);model=settings.model;
  const timeout=AbortSignal.timeout(240000),requestSignal=signal?AbortSignal.any([signal,timeout]):timeout;
  const encoded=reference?b64(new Uint8Array(reference.bytes)):'';
  let url,body,headers={'Content-Type':'application/json'};
  if(provider==='openai'){
   if(!env.OPENAI_API_KEY)throw Error('OpenAI API is unavailable. Configure the server key or choose another provider.');
   url='https://api.openai.com/v1/chat/completions';headers.Authorization=`Bearer ${env.OPENAI_API_KEY}`;
-  body={model,messages:[{role:'user',content:[{type:'text',text:prompt},...(reference?[{type:'image_url',image_url:{url:`data:${reference.mime};base64,${encoded}`}}]:[])]}],response_format:{type:'json_schema',json_schema:{name:'clinic_content',strict:true,schema}}};
+  body={model,...(settings.reasoningEffort?{reasoning_effort:settings.reasoningEffort}:{}),messages:[{role:'user',content:[{type:'text',text:prompt},...(reference?[{type:'image_url',image_url:{url:`data:${reference.mime};base64,${encoded}`}}]:[])]}],response_format:{type:'json_schema',json_schema:{name:'clinic_content',strict:true,schema}}};
  }else if(provider==='gemini'){
   if(!env.GEMINI_API_KEY)throw Error('Gemini API is unavailable. Configure the server key or choose another provider.');
   url=`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`;headers['x-goog-api-key']=env.GEMINI_API_KEY;
-  body={contents:[{parts:[{text:prompt},...(reference?[{inlineData:{mimeType:reference.mime,data:encoded}}]:[])]}],generationConfig:{responseMimeType:'application/json',responseJsonSchema:schema}};
+  body={contents:[{parts:[{text:prompt},...(reference?[{inlineData:{mimeType:reference.mime,data:encoded}}]:[])]}],generationConfig:{responseMimeType:'application/json',responseJsonSchema:schema,...(settings.thinkingConfig?{thinkingConfig:settings.thinkingConfig}:{})}};
  }else if(provider==='claude'){
   if(!env.ANTHROPIC_API_KEY)throw Error('Claude API is unavailable. Configure the server key or choose another provider.');
   url='https://api.anthropic.com/v1/messages';headers['x-api-key']=env.ANTHROPIC_API_KEY;headers['anthropic-version']='2023-06-01';
