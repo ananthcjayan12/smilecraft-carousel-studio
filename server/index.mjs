@@ -1,3 +1,4 @@
+import { localV4 } from './v4/local.mjs';
 import { imageFormat } from '../web/image-formats.js';
 import { selectedReferenceContext } from './prompt-context.mjs';
 import { compatibleModel } from '../web/provider-models.js';
@@ -57,6 +58,8 @@ if(stage==='image'){if(slideIndex==null||slideIndex<0||slideIndex>4)throw Object
 throw Object.assign(new Error('Unknown job stage.'),{status:400})}catch(e){finishJob(job.id,'failed',null,e.message);throw e}}
 
 const server=http.createServer(async(req,res)=>{const u=new URL(req.url||'/',`http://${host}`),parts=routeParts(u.pathname);try{
+if(u.pathname==='/api/me'&&req.method==='GET')return send(res,200,{user:{email:'Local workspace'},account:{id:'local',role:'owner'},csrf:'',isAdmin:false});
+if(u.pathname.startsWith('/api/v4/')){const bytes=['GET','HEAD'].includes(req.method)?undefined:await bodyBuffer(req,2_000_000);const request=new Request(u,{method:req.method,headers:req.headers,body:bytes});const response=await localV4.route(request,'local',u);res.writeHead(response.status,Object.fromEntries(response.headers));return res.end(Buffer.from(await response.arrayBuffer()));}
 if(u.pathname==='/api/status'&&req.method==='GET'){const textProviders=textProviderStatus(codexCli.installed,antigravityCli.installed,codexCli.authenticated),imageProviders=imageProviderStatus(codexCli.installed&&codexCli.authenticated,antigravityCli.installed);return send(res,200,{codexAvailable:codexCli.installed,codexAuthenticated:codexCli.authenticated,cli:{codex:codexCli,antigravity:antigravityCli},textProviders,imageProviders,providerConcurrency,textConcurrency,storageRoot,localOnly:['127.0.0.1','localhost'].includes(host)})}
 if(u.pathname==='/api/generation-activity'&&req.method==='GET')return send(res,200,{image:providerActivity('image'),text:providerActivity('text')});
 if(u.pathname==='/api/models/agy'&&req.method==='GET'){if(!antigravityCli.installed)return send(res,409,{error:'Antigravity CLI (agy) is not installed or is not on PATH.'});return send(res,200,{models:await availableAgyModels(process.env.AGY_BIN||'agy')})}

@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { spawnSync } from 'node:child_process';
+import { execFile, spawnSync } from 'node:child_process';
 
 function executable(file) {
   try { fs.accessSync(file, fs.constants.X_OK); return true; } catch { return false; }
@@ -26,6 +26,22 @@ export function inspectCli(name, envKey, { authArgs } = {}) {
   const installed = versionCheck.status === 0;
   const version = installed ? String(versionCheck.stdout || versionCheck.stderr || '').trim() : '';
   const authCheck = installed && authArgs ? spawnSync(binary, authArgs, { encoding: 'utf8', timeout: 8000 }) : null;
+  const authenticated = authArgs ? Boolean(authCheck && authCheck.status === 0) : installed;
+  const error = installed ? (authenticated ? '' : String(authCheck?.stderr || authCheck?.stdout || 'Authentication required.').trim()) : String(versionCheck.error?.message || versionCheck.stderr || `${name} was not found.`).trim();
+  return { binary, installed, authenticated, version, error };
+}
+
+function run(binary, args, timeout) {
+  return new Promise(resolve => execFile(binary, args, { encoding: 'utf8', timeout, windowsHide: true }, (error, stdout, stderr) => resolve({ status: error ? (typeof error.code === 'number' ? error.code : 1) : 0, stdout, stderr, error })));
+}
+
+// Non-blocking variant for request handlers: spawnSync stalls every other request while the CLI starts.
+export async function inspectCliAsync(name, envKey, { authArgs } = {}) {
+  const binary = resolveCliBinary(name, envKey);
+  const versionCheck = await run(binary, ['--version'], 5000);
+  const installed = versionCheck.status === 0;
+  const version = installed ? String(versionCheck.stdout || versionCheck.stderr || '').trim() : '';
+  const authCheck = installed && authArgs ? await run(binary, authArgs, 8000) : null;
   const authenticated = authArgs ? Boolean(authCheck && authCheck.status === 0) : installed;
   const error = installed ? (authenticated ? '' : String(authCheck?.stderr || authCheck?.stdout || 'Authentication required.').trim()) : String(versionCheck.error?.message || versionCheck.stderr || `${name} was not found.`).trim();
   return { binary, installed, authenticated, version, error };

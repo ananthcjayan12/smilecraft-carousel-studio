@@ -5,8 +5,8 @@
   "type": "module",
   "description": "Web-only multi-business carousel studio",
   "scripts": {
-    "start": "node server/index.mjs",
-    "dev": "node --watch server/index.mjs",
+    "start": "node scripts/local-start.mjs",
+    "dev": "node --watch scripts/local-start.mjs",
     "test": "node --test tests/*.test.mjs scripts/cloudflare/*.test.mjs",
     "cloudflare:prepare": "node scripts/cloudflare/provision.mjs",
     "cloudflare:deploy": "node scripts/cloudflare/deploy.mjs",
@@ -22,7 +22,7 @@
     "sharp": "^0.33.5"
   },
   "engines": {
-    "node": ">=20"
+    "node": ">=22"
   },
   "devDependencies": {
     "wrangler": "^4.142.0"

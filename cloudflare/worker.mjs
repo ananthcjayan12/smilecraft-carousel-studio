@@ -1,4 +1,5 @@
 import { session, mutationAllowed, loginPage, authRoute } from './auth.mjs';
+import { cloudV4 } from './v4.mjs';
 import { apiRoute } from './studio.mjs';
 import { consumeJob, recoverStaleJobs } from './generation.mjs';
 import { companionRoute, expireCompanionJobs } from './companion.mjs';
@@ -10,7 +11,7 @@ export default {
     try {
       if (path === '/health') {
         await env.DB.prepare('SELECT 1').first();
-        return json({ service: 'carousel-studio-v3', ready: true, signInConfigured: Boolean(env.GOOGLE_CLIENT_ID && env.GOOGLE_CLIENT_SECRET), providersConfigured: { openai: Boolean(env.OPENAI_API_KEY), gemini: Boolean(env.GEMINI_API_KEY) } });
+        return json({ service: 'srshti-v4', ready: true, signInConfigured: Boolean(env.GOOGLE_CLIENT_ID && env.GOOGLE_CLIENT_SECRET), providersConfigured: { openai: Boolean(env.OPENAI_API_KEY), gemini: Boolean(env.GEMINI_API_KEY) } });
       }
       if (path.startsWith('/api/auth/')) {
         const auth = await authRoute(request, env, url);
@@ -22,10 +23,11 @@ export default {
         return companionRoute(request,env,viewer,url);
       }
       if (path === '/login') return viewer ? Response.redirect(`${env.APP_ORIGIN}/`, 302) : loginPage(env, url.searchParams.get('error') || '');
-      if (path === '/') return viewer ? env.STATIC.fetch(request) : Response.redirect(`${env.APP_ORIGIN}/login`, 302);
+      if (path === '/') return env.STATIC.fetch(request);
       if (path.startsWith('/api/')) {
         if (!viewer) return json({ error: 'Sign in to continue.' }, 401);
         if (!['GET', 'HEAD'].includes(request.method) && !mutationAllowed(request, env, viewer)) return json({ error: 'This request did not pass the session check. Reload and retry.' }, 403);
+        if(path.startsWith('/api/v4/'))return cloudV4(env).route(request,viewer.account_id,url);
         return apiRoute(request, env, viewer, url);
       }
       return env.STATIC.fetch(request);
@@ -34,11 +36,11 @@ export default {
       return json({ error: error.status && error.status < 500 ? error.message : 'The service could not complete that request.' }, error.status || 500);
     }
   },
-  async scheduled(_event, env) { await recoverStaleJobs(env); await expireCompanionJobs(env); },
+  async scheduled(_event, env) { await recoverStaleJobs(env); await expireCompanionJobs(env); await cloudV4(env).recover(); },
   async queue(batch, env) {
-    for (const message of batch.messages) {
-      try { await consumeJob(env, message.body?.jobId); message.ack(); }
+    await Promise.all(batch.messages.map(async message => {
+      try { if(message.body?.v4JobId)await cloudV4(env).consume(message.body.v4JobId);else await consumeJob(env, message.body?.jobId); message.ack(); }
       catch (error) { console.error('Queue processing failed', error); message.retry(); }
-    }
+    }));
   }
 };

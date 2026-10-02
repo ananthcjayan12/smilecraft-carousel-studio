@@ -7,11 +7,13 @@ export async function smokeTest(origin, { request = fetch, attempts = 8, retryDe
     try {
       const health = await request(`${origin}/health`, { signal: AbortSignal.timeout(15000) });
       const result = await health.json();
-      if (!health.ok || result.service !== 'carousel-studio-v3' || result.ready !== true) throw new Error('Cloud app health failed.');
+      if (!health.ok || result.service !== 'srshti-v4' || result.ready !== true) throw new Error('Cloud app health failed.');
       const api = await request(`${origin}/api/clients`, { signal: AbortSignal.timeout(15000) });
       if (api.status !== 401) throw new Error('Private customer API was exposed.');
       const home = await request(`${origin}/`, { redirect: 'manual', signal: AbortSignal.timeout(15000) });
-      if (home.status !== 302 || !home.headers.get('Location')?.endsWith('/login')) throw new Error('Unauthenticated home did not redirect to sign-in.');
+      if(!home.ok || !(await home.text()).includes('/v4/app.js'))throw new Error('The V4 landing page was not served.');
+      const v4=await request(`${origin}/api/v4/bootstrap`,{signal:AbortSignal.timeout(15000)});
+      if(v4.status!==401)throw new Error('Private V4 clinic API was exposed.');
       const login = await request(`${origin}/login`, { signal: AbortSignal.timeout(15000) });
       const html = await login.text();
       // Check the authentication surface, not marketing copy or its capitalization.

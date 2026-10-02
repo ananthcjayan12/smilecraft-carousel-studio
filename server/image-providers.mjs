@@ -1,3 +1,5 @@
+import { AsyncLocalStorage } from 'node:async_hooks';
+const generationContext = new AsyncLocalStorage();
 import { styleVariantInstructions } from '../web/style-variant.js';
 import { imageFormat, formatInstructions, openaiImageSize } from '../web/image-formats.js';
 import { businessPromptContext } from './prompt-context.mjs';
@@ -94,10 +96,11 @@ export function buildSlideImagePrompt(data) {
 
 async function fetchJson(url, options, timeoutMs = 180000) {
   for (let attempt = 0; attempt < 4; attempt++) {
+    generationContext.getStore()?.signal?.throwIfAborted();
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), timeoutMs);
     try {
-      const response = await fetch(url, { ...options, signal: controller.signal });
+      const response = await fetch(url, { ...options, signal: generationContext.getStore()?.signal ? AbortSignal.any([controller.signal, generationContext.getStore().signal]) : controller.signal });
       const json = await response.json().catch(() => ({}));
       if (response.ok) return json;
       // Account-specific provider limits cannot be inferred from a model name.
@@ -126,6 +129,7 @@ async function openaiImage(prompt, reference, logo, requestedModel, master, form
   form.append('output_format', 'png');
   form.append('image[]', new Blob([reference.bytes], { type: reference.mime }), `template.${reference.mime.split('/')[1]}`);
   if (master) form.append('image[]', new Blob([master.bytes], { type: master.mime }), `master.${master.mime.split('/')[1]}`);
+  for (const [i, ref] of (generationContext.getStore()?.references || []).entries()) form.append('image[]', new Blob([ref.bytes], {type:ref.mime}), `design-${i}.png`);
   if (logo) form.append('image[]', new Blob([logo.bytes], { type: logo.mime }), `logo.${logo.mime.split('/')[1]}`);
   const json = await fetchJson('https://api.openai.com/v1/images/edits', { method: 'POST', headers: { Authorization: `Bearer ${process.env.OPENAI_API_KEY}` }, body: form });
   return outputDataUrl(json.data?.[0]?.b64_json, `image/${json.output_format || 'png'}`);
@@ -136,6 +140,7 @@ async function geminiImage(prompt, reference, logo, requestedModel, master, form
   const model = limit(requestedModel, 100).trim() || process.env.GEMINI_IMAGE_MODEL || 'gemini-3.1-flash-image';
   const input = [{ type: 'text', text: prompt }, { type: 'image', mime_type: reference.mime, data: reference.base64 }];
   if (master) input.push({ type: 'image', mime_type: master.mime, data: master.base64 });
+  for (const ref of generationContext.getStore()?.references || []) input.push({type:'image', mime_type:ref.mime, data:ref.base64});
   if (logo) input.push({ type: 'image', mime_type: logo.mime, data: logo.base64 });
   const json = await fetchJson('https://generativelanguage.googleapis.com/v1beta/interactions', {
     method: 'POST',
@@ -147,7 +152,7 @@ async function geminiImage(prompt, reference, logo, requestedModel, master, form
 
 function runProcess(command, args, options, timeoutMs = 300000) {
   return new Promise((resolve, reject) => {
-    const child = spawn(command, args, { ...options, stdio: ['pipe', 'pipe', 'pipe'] });
+    const child = spawn(command, args, { ...options, signal: generationContext.getStore()?.signal, stdio: ['pipe', 'pipe', 'pipe'] });
     let stdout = '', stderr = '', settled = false;
     const timer = setTimeout(() => { child.kill('SIGTERM'); finish(new Error(`${command} timed out.`)); }, timeoutMs);
     const finish = (error, value) => { if (settled) return; settled = true; clearTimeout(timer); error ? reject(error) : resolve(value); };
@@ -187,19 +192,20 @@ async function writeReferenceFiles(work, reference, logo, master) {
   if (logo) { logoPath = path.join(work, `logo.${logo.mime.split('/')[1]}`); await writeFile(logoPath, logo.bytes); }
   let masterPath = '';
   if (master) { masterPath = path.join(work, `master.${master.mime.split('/')[1]}`); await writeFile(masterPath, master.bytes); }
-  return { referencePath, logoPath, masterPath };
+  const extraPaths = await Promise.all((generationContext.getStore()?.references || []).map(async (ref,i) => {const file=path.join(work, `design-${i}.png`);await writeFile(file,ref.bytes);return file;}));
+  return { referencePath, logoPath, masterPath, extraPaths };
 }
 
 async function codexImage(prompt, reference, logo, requestedModel, master, format = 'slide', aspectRatio = '4:5') {
   const work = await mkdtemp(path.join(tmpdir(), 'smilecraft-image-'));
   try {
-    const { referencePath, logoPath, masterPath } = await writeReferenceFiles(work, reference, logo, master);
+    const { referencePath, logoPath, masterPath, extraPaths } = await writeReferenceFiles(work, reference, logo, master);
     const outputPath = path.join(work, 'final-slide.png');
     await runProcess('git', ['init', '-q'], { cwd: work, env: { ...process.env } }, 10000);
     const instruction = `$imagegen\nGenerate the final image described below. Inspect ${path.basename(referencePath)} as the ${format === 'board' ? 'design-direction inspiration' : 'slide layout reference'}${masterPath ? ` and ${path.basename(masterPath)} as an additional visual reference` : ''}${logoPath ? ` and ${path.basename(logoPath)} as the exact business logo` : ''}. Generate ONE finished image using HIGH image quality and save it in the current working directory as final-slide.png. Use Codex built-in image generation. Do NOT call the OpenAI API manually. Do NOT create a Python image-generation script. Do not only describe it; actually generate the file.\n\n${prompt}`;
     const model = limit(requestedModel, 100).trim();
     const env = { ...process.env, CI: '1' }; delete env.OPENAI_API_KEY; delete env.CODEX_API_KEY;
-    const images = [referencePath, ...(masterPath ? [masterPath] : []), ...(logoPath ? [logoPath] : [])];
+    const images = [referencePath, ...extraPaths, ...(masterPath ? [masterPath] : []), ...(logoPath ? [logoPath] : [])];
     await runProcess(process.env.CODEX_BIN || 'codex', ['exec', '--ephemeral', ...(model && model !== 'imagegen' ? ['--model', model] : []), '--sandbox', 'workspace-write', '--image', ...images, '--', instruction], { cwd: work, env }, 900000);
     const generated = await stat(outputPath).catch(() => null);
     if (!generated?.isFile() || generated.size < 10_000) throw new Error('Codex completed without creating a usable final-slide.png. Check Codex login and built-in image generation availability.');
@@ -210,14 +216,16 @@ async function codexImage(prompt, reference, logo, requestedModel, master, forma
 async function antigravityImage(prompt, reference, logo, requestedModel, master, format = 'slide', aspectRatio = '4:5') {
   const work = await mkdtemp(path.join(tmpdir(), 'smilecraft-agy-image-'));
   try {
-    const { referencePath, logoPath, masterPath } = await writeReferenceFiles(work, reference, logo, master);
+    const { referencePath, logoPath, masterPath, extraPaths } = await writeReferenceFiles(work, reference, logo, master);
     const outputPath = path.join(work, 'final-slide.png');
-    const imagePaths = [path.basename(referencePath), ...(masterPath ? [path.basename(masterPath)] : []), ...(logoPath ? [path.basename(logoPath)] : [])];
+    const imagePaths = [path.basename(referencePath), ...extraPaths.map(file=>path.basename(file)), ...(masterPath ? [path.basename(masterPath)] : []), ...(logoPath ? [path.basename(logoPath)] : [])];
     const model = limit(requestedModel, 100).trim();
     const imageNames = { 'gemini-3-pro-image': 'Nano Banana Pro', 'gemini-3.1-flash-image': 'Nano Banana 2', 'gemini-3.1-flash-lite-image': 'Nano Banana 2 Lite', 'gemini-2.5-flash-image': 'Nano Banana' };
     const imageModel = imageNames[model] ? model : 'gemini-3-pro-image';
+    // V4 local jobs choose the agy model (from `agy models`) that drives the native image tool.
+    const agentModel = limit(generationContext.getStore()?.agyModel, 100).trim();
     const instruction = `Call the native generate_image tool to create the final image described below. Request ${imageNames[imageModel]} (${imageModel}) for image generation. Pass ImageName exactly as "final-slide.png" and ImagePaths exactly as ${JSON.stringify(imagePaths)}. Use the closest supported ${format === 'board' ? '4:3 landscape' : imageFormat(aspectRatio).ratio} aspect ratio${format === 'board' ? '' : ' and preserve the requested safe area'}. The required final file is ${outputPath}. Do not only describe the image; actually create the file.\n\n${prompt}`;
-    const result = await runProcess(process.env.AGY_BIN || 'agy', ['--mode', 'accept-edits', '--sandbox', '--dangerously-skip-permissions', '--output-format', 'json', '--print-timeout', process.env.AGY_IMAGE_TIMEOUT || '10m', '-p', instruction], { cwd: work, env: { ...process.env } }, 660000);
+    const result = await runProcess(process.env.AGY_BIN || 'agy', ['--mode', 'accept-edits', '--sandbox', '--dangerously-skip-permissions', '--output-format', 'json', '--print-timeout', process.env.AGY_IMAGE_TIMEOUT || '10m', ...(agentModel ? ['--model', agentModel] : []), '-p', instruction], { cwd: work, env: { ...process.env } }, 660000);
     parseAgyImageEnvelope(result.stdout);
     const generated = await stat(outputPath).catch(() => null);
     if (!generated?.isFile() || generated.size < 10_000) throw new Error('Antigravity completed without creating a usable final-slide.png. Confirm that this agy installation has the native generate_image tool and filesystem permission.');
@@ -240,7 +248,7 @@ export async function generateSlideImage(data) {
   const reference = parseDataUrl(data.referenceImage, 'Template reference');
   const logo = data.logoImage ? parseDataUrl(data.logoImage, 'Clinic logo') : null;
   const master = data.masterReferenceImage ? parseDataUrl(data.masterReferenceImage, 'Master design board') : null;
-  const prompt = buildSlideImagePrompt(data);
+  const prompt = data.prompt || buildSlideImagePrompt(data);
   const started = Date.now();
   try {
     let image;
@@ -281,3 +289,13 @@ Keep all five cards fully visible, evenly separated, straight-on, and easy to cr
   if (data.provider === 'antigravity') return antigravityImage(prompt, reference, logo, data.model, mood, 'board');
   throw Object.assign(new Error('Choose a supported image provider.'), { status: 400 });
 }
+
+// V4 supplies its own dental/language prompt and the full reference set.
+export async function generateReferenceImage({provider, model, agyModel, prompt, referenceImages, logoImage, signal}) {
+  const [reference, ...references] = referenceImages.map(value=>parseDataUrl(value,'Design reference'));
+  const logo=logoImage?parseDataUrl(logoImage,'Clinic logo'):null;
+  const generate={openai:openaiImage,gemini:geminiImage,codex:codexImage,antigravity:antigravityImage}[provider];
+  if(!generate)throw new Error('Unsupported image provider.');
+  return generationContext.run({references,signal,agyModel},()=>{signal?.throwIfAborted();return generate(prompt,reference,logo,compatibleModel(provider,model,'image'),null,'board');});
+}
+export const withImageCancellation=(signal,work,{agyModel}={})=>generationContext.run({signal,agyModel},work);

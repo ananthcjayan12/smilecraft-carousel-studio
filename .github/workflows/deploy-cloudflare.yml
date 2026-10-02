@@ -33,6 +33,7 @@ jobs:
           DEAD_QUEUE_NAME: ${{ vars.DEAD_QUEUE_NAME }}
           APP_ORIGIN: ${{ vars.APP_ORIGIN }}
           ADMIN_EMAIL: ${{ vars.ADMIN_EMAIL }}
+          SRSHTI_IMAGE_MODEL: ${{ vars.SRSHTI_IMAGE_MODEL }}
         run: |
           npm run cloudflare:prepare
           npx --no-install wrangler d1 migrations apply DB --remote --config wrangler.generated.json

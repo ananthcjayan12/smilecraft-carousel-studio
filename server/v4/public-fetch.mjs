@@ -1,0 +1,6 @@
+import dns from 'node:dns/promises';
+import https from 'node:https';
+import net from 'node:net';
+import {Readable} from 'node:stream';
+export function isPublicAddress(address){if(net.isIPv4(address)){const [a,b]=address.split('.').map(Number);return !(a===0||a===10||a===127||a>=224||a===169&&b===254||a===172&&b>=16&&b<=31||a===192&&[0,168].includes(b)||a===100&&b>=64&&b<=127||a===198&&[18,19].includes(b));}return /^2[0-9a-f]{3}:/i.test(address)&&!/^2001:(?:db8|0|10|20):/i.test(address);}
+export async function nodePublicFetch(url,options){const addresses=await dns.lookup(new URL(url).hostname,{all:true});if(!addresses.length||addresses.some(({address})=>!isPublicAddress(address)))throw Error('This website resolves to a private address.');const pinned=addresses[0];return new Promise((resolve,reject)=>{const request=https.request(url,{headers:options.headers,signal:options.signal,lookup:(_hostname,lookupOptions,callback)=>lookupOptions.all?callback(null,[pinned]):callback(null,pinned.address,pinned.family)},response=>resolve(new Response([204,205,304].includes(response.statusCode)?null:Readable.toWeb(response),{status:response.statusCode,headers:Object.entries(response.headers).filter(([,value])=>value!==undefined).map(([key,value])=>[key,Array.isArray(value)?value.join(', '):value])})));request.on('error',reject);request.end()})}

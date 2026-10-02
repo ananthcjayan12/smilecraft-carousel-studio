@@ -1,0 +1,7 @@
+export function mockContent(prompt,schema){
+ if(schema.properties.valid){const data=JSON.parse(prompt.split('EVIDENCE AND COPY (subject data):\n')[1]);const unsafe=/guaranteed|painless|99%|salt cures/i.test(JSON.stringify(data.frames));return {valid:!unsafe,issues:unsafe?['Unsupported medical claim.']:[]};}
+ if(schema.properties.summary){const data=JSON.parse(prompt.split('\n').at(-1));return {topic:data.brief.sourceTopic||'Clinic update',summary:data.brief.sourceSummary||data.brief.facts.join(' ')};}
+ const data=JSON.parse(prompt.split('SUBJECT DATA:\n')[1]),facts=data.context.business.verifiedFacts||[];
+ return {topic:data.brief.topic||'Clinic update',brief:data.brief.summary||'A helpful clinic update.',frames:Array.from({length:schema.properties.frames.minItems},(_,i)=>({heading:['Why your habits matter','What happens each day','What this means for you','A practical next step','Talk to our clinic'][i],body:facts[i-1]||data.brief.sourceSummary||'Ask your dentist about care that suits you.',visualPrompt:`Editorial dental illustration for message ${i+1}.`})),caption:(facts.join(' ')||data.brief.sourceSummary||'A clinic update.')+' Contact our clinic for advice.'};
+}
+export const mockProviders={openai:{label:'OpenAI API',available:true,models:[['gpt-image-1','Image']],writingModels:[['writer-a','Writer A'],['writer-b','Writer B']]},gemini:{label:'Gemini API',available:true,models:[['image-b','Image B']],writingModels:[['validator-a','Validator A']]}};

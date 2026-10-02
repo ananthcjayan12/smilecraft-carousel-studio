@@ -34,8 +34,8 @@ export function parseAgyModels(output) {
   return options;
 }
 
-export async function availableAgyModels(bin = process.env.AGY_BIN || 'agy') {
-  const models = parseAgyModels(await command(bin, ['models'], { timeoutMs: 12000 }));
+export async function availableAgyModels(bin = process.env.AGY_BIN || 'agy', { cwd, timeoutMs = 12000 } = {}) {
+  const models = parseAgyModels(await command(bin, ['models'], { cwd, timeoutMs }));
   if (!models.length) throw new Error('AGY CLI returned no recognizable models. Run `agy models` in Terminal to verify the signed-in account.');
   return models;
 }

@@ -48,6 +48,7 @@ export async function provision(env = process.env, fetcher = fetch) {
   config.queues.consumers[0].queue = names.queue;
   config.queues.consumers[0].dead_letter_queue = names.deadQueue;
   config.vars = { APP_ORIGIN: origin, ADMIN_EMAIL: env.ADMIN_EMAIL || '' };
+  if(env.SRSHTI_IMAGE_MODEL)config.vars.SRSHTI_IMAGE_MODEL=env.SRSHTI_IMAGE_MODEL;
   if (!new URL(origin).hostname.endsWith('.workers.dev')) config.routes = [{ pattern: new URL(origin).hostname, custom_domain: true }];
   await writeFile('wrangler.generated.json', JSON.stringify(config, null, 2) + '\n');
   const state = { ...names, origin, databaseId: config.d1_databases[0].database_id,
