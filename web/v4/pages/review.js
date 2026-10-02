@@ -1,12 +1,12 @@
-import {api,image} from '../api.js';
+import {api,image,apiCacheRevision} from '../api.js';
 import {esc,attr,title,status,typeLabel,sources,retryJobs,area,field} from '../ui.js';
 import {go,refreshWeek,toast,refreshClinic} from '../app.js';
 import {styleField,contactFields,contactCopy} from '../content-form.js';
-let edit=false,editBrief=false,currentId='',currentItem=null;
+let edit=false,editBrief=false,currentId='',currentItem=null,currentCacheRevision=-1;
 export async function render(state,params){
  const id=params.get('id');if(!id)return '<a class="btn" href="#/library">Back to content</a>';
  if(currentId!==id){edit=false;editBrief=false;currentId=id;state.frame=0;}
- const data=await api(`/content/${id}`,{cache:false}),item=data.item;currentItem=item;state.reviewItem=item;state.contentJobs=data.jobs;
+ const revision=apiCacheRevision(),data=state.reviewItem?.id===id&&currentCacheRevision===revision?{item:state.reviewItem,jobs:state.contentJobs||[]}:await api(`/content/${id}`),item=data.item;currentCacheRevision=revision;currentItem=item;state.reviewItem=item;state.contentJobs=data.jobs;
  if(state.clinic?.id!==item.clinic_id){state.clinic=state.bootstrap.clinics.find(c=>c.id===item.clinic_id);await refreshClinic();}
 
  const frame=item.frames[Math.min(state.frame,item.frames.length-1)],ready=item.frames.length>0&&item.frames.every(f=>f.assetId),working=['briefing','writing','validating','generating'].includes(item.status),copyReady=item.copy_status==='validated',copyApproved=item.copy_status==='approved',back=item.week_id?'#/week':'#/library';

@@ -46,3 +46,5 @@ npm run cloudflare:check
 ### Content writing and custom content
 
 V4 prepares language-aware briefs, then writes content using the selected template image and the v3 prompt guidance. Weekly drafts are validated and approved automatically before artwork generation. Standalone carousels, stories and posts require copy review and approval. **Create content** accepts custom briefs; weekly pieces can also use your own brief. **Settings → Providers** maps a provider and model separately to writing, validation, styles and artwork. Confirm your CTA contacts in **Brand & styles**. Cloud deployment requires migration `0011_v4_content_pipeline.sql`; local startup applies it automatically.
+
+The V4 browser app is bundled by `npm run web:build`. Local startup, tests and Wrangler deployment run this build automatically. Fonts are served locally; private API responses include `Server-Timing` headers for diagnosing session and application latency.

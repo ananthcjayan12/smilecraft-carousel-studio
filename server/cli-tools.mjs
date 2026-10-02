@@ -20,15 +20,18 @@ export function resolveCliBinary(name, envKey, env = process.env) {
   return name;
 }
 
-export function inspectCli(name, envKey, { authArgs } = {}) {
-  const binary = resolveCliBinary(name, envKey);
+const inspections=new Map();
+const inspectionKey=(binary,authArgs)=>JSON.stringify([binary,authArgs||[]]);
+export function inspectCli(name, envKey, { authArgs, refresh=false } = {}) {
+  const binary = resolveCliBinary(name, envKey),key=inspectionKey(binary,authArgs),cached=inspections.get(key);
+  if(!refresh&&cached&&cached.expires>Date.now())return {...cached.value};
   const versionCheck = spawnSync(binary, ['--version'], { encoding: 'utf8', timeout: 5000 });
   const installed = versionCheck.status === 0;
   const version = installed ? String(versionCheck.stdout || versionCheck.stderr || '').trim() : '';
   const authCheck = installed && authArgs ? spawnSync(binary, authArgs, { encoding: 'utf8', timeout: 8000 }) : null;
   const authenticated = authArgs ? Boolean(authCheck && authCheck.status === 0) : installed;
   const error = installed ? (authenticated ? '' : String(authCheck?.stderr || authCheck?.stdout || 'Authentication required.').trim()) : String(versionCheck.error?.message || versionCheck.stderr || `${name} was not found.`).trim();
-  return { binary, installed, authenticated, version, error };
+  const value={binary,installed,authenticated,version,error};inspections.set(inspectionKey(binary,authArgs),{value,expires:Date.now()+30000});return {...value};
 }
 
 function run(binary, args, timeout) {
@@ -44,5 +47,5 @@ export async function inspectCliAsync(name, envKey, { authArgs } = {}) {
   const authCheck = installed && authArgs ? await run(binary, authArgs, 8000) : null;
   const authenticated = authArgs ? Boolean(authCheck && authCheck.status === 0) : installed;
   const error = installed ? (authenticated ? '' : String(authCheck?.stderr || authCheck?.stdout || 'Authentication required.').trim()) : String(versionCheck.error?.message || versionCheck.stderr || `${name} was not found.`).trim();
-  return { binary, installed, authenticated, version, error };
+  const value={binary,installed,authenticated,version,error};inspections.set(inspectionKey(binary,authArgs),{value,expires:Date.now()+30000});return {...value};
 }

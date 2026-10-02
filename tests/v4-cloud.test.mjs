@@ -60,3 +60,21 @@ test('performance migration creates indexes without changing existing content',a
  assert.ok(f.sqlite.prepare("PRAGMA index_list('v4_jobs')").all().some(i=>i.name==='v4_jobs_account_content'));
  }finally{f.sqlite.close();}
 });
+
+
+test('the public homepage does not query session storage',async()=>{
+ const {default:worker}=await import('../cloudflare/worker.mjs');let reads=0;
+ const response=await worker.fetch(new Request('https://studio.test/',{headers:{Cookie:'cs_session=test'}}),{DB:{prepare(){reads++;throw Error('Unexpected session query')}},STATIC:{fetch:async()=>new Response('app shell')}});
+ assert.equal(response.status,200);assert.equal(await response.text(),'app shell');assert.equal(reads,0);
+});
+
+test('bootstrap bundles identity and selected clinic without exposing another account',async()=>{
+ const f=fixture();try{const c=(await f.call('/clinics','POST',{name:'River Dental'})).clinic;
+ const viewer={user_id:'user-a',email:'owner@example.com',account_id:'A',role:'owner',csrf:'test-csrf'},service=cloudV4(f.env,{viewer});
+ const url=new URL(`https://studio.test/api/v4/bootstrap?include=clinic&clinic=${c.id}`);
+ const data=await (await service.route(new Request(url),'A',url)).json();
+ assert.equal(data.me.user.email,viewer.email);assert.equal(data.me.csrf,viewer.csrf);
+ assert.equal(data.workspace.clinic.id,c.id);assert.deepEqual(data.workspace.styles,[]);assert.deepEqual(data.workspace.jobs,[]);
+ const other=await (await service.route(new Request(url),'B',url)).json();assert.equal(other.clinics.length,0);assert.equal(other.workspace,undefined);
+ }finally{f.sqlite.close();}
+});

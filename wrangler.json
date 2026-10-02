@@ -13,7 +13,6 @@
     "directory": "./web",
     "binding": "STATIC",
     "run_worker_first": [
-      "/",
       "/login",
       "/legacy.html",
       "/health",
@@ -59,5 +58,11 @@
   },
   "images": {
     "binding": "IMAGES"
+  },
+  "placement": {
+    "mode": "smart"
+  },
+  "build": {
+    "command": "npm run web:build"
   }
 }

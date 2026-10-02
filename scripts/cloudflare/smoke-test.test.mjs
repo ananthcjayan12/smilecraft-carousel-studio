@@ -4,7 +4,7 @@ import worker from '../../cloudflare/worker.mjs';
 import { smokeTest } from './smoke-test.mjs';
 
 const origin = 'https://smoke.example';
-const environment = () => ({ APP_ORIGIN: origin, STATIC:{fetch:async()=>new Response('<html><script src="/v4/app.js"></script></html>',{headers:{'Content-Type':'text/html'}})}, DB: { prepare: () => ({ first: async () => ({ ready: 1 }) }) } });
+const environment = () => ({ APP_ORIGIN: origin, STATIC:{fetch:async()=>new Response('<html><script src="/v4/studio.bundle.js"></script></html>',{headers:{'Content-Type':'text/html'}})}, DB: { prepare: () => ({ first: async () => ({ ready: 1 }) }) } });
 
 for (const configured of [true, false]) {
   test(`smoke check accepts the actual Worker login page with Google sign-in ${configured ? 'configured' : 'pending'}`, async () => {

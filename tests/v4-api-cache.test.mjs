@@ -17,3 +17,12 @@ test('an old pending read cannot refill the cache after a mutation',async t=>{
  const stale=api('/race');await api('/race',{method:'PUT',body:{}});release();await stale;
  assert.equal((await api('/race')).value,'new');
 });
+
+
+test('overlapping progress reads share one fresh request while bypassing saved data',async t=>{
+ clearApiCache();let reads=0,release;const blocked=new Promise(resolve=>release=resolve);
+ t.mock.method(globalThis,'fetch',async()=>{if(++reads===2)await blocked;return Response.json({value:reads});});
+ assert.equal((await api('/progress')).value,1);
+ const first=api('/progress',{cache:false}),second=api('/progress',{cache:false});release();
+ assert.equal((await first).value,2);assert.equal((await second).value,2);assert.equal(reads,2);
+});

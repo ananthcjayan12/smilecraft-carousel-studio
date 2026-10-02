@@ -11,7 +11,7 @@ export async function smokeTest(origin, { request = fetch, attempts = 8, retryDe
       const api = await request(`${origin}/api/clients`, { signal: AbortSignal.timeout(15000) });
       if (api.status !== 401) throw new Error('Private customer API was exposed.');
       const home = await request(`${origin}/`, { redirect: 'manual', signal: AbortSignal.timeout(15000) });
-      if(!home.ok || !(await home.text()).includes('/v4/app.js'))throw new Error('The V4 landing page was not served.');
+      if(!home.ok || !(await home.text()).includes('/v4/studio.bundle.js'))throw new Error('The V4 landing page was not served.');
       const v4=await request(`${origin}/api/v4/bootstrap`,{signal:AbortSignal.timeout(15000)});
       if(v4.status!==401)throw new Error('Private V4 clinic API was exposed.');
       const login = await request(`${origin}/login`, { signal: AbortSignal.timeout(15000) });

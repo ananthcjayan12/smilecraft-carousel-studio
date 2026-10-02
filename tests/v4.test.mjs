@@ -8,11 +8,11 @@ import {publicUrl,publicFetch,extractCandidates} from '../server/v4/extract.mjs'
 import {mockContent,mockProviders} from './v4-fixtures.mjs';
 const pipeline=await readFile(new URL('../cloudflare/migrations/0011_v4_content_pipeline.sql',import.meta.url),'utf8');
 const migration=await readFile(new URL('../cloudflare/migrations/0009_srshti_v4.sql',import.meta.url),'utf8');
-function fixture(){const sqlite=new Database(':memory:');sqlite.exec(migration+pipeline);const queued=[],assets=new Map();let brokenPosition=0,generated=0,active=true,rejectValidation=false;const textCalls=[];const db={prepare(sql){return {bind(...args){const stmt=sqlite.prepare(sql);return {first:async()=>stmt.get(...args)||null,all:async()=>({results:stmt.all(...args)}),run:async()=>({meta:stmt.run(...args)})}}}}};const service=createV4Service({db,providerCatalog:async()=>mockProviders,generateText:async(input)=>{textCalls.push(input);if(input.schema.properties.valid&&rejectValidation)return {valid:false,issues:['Unsupported advice.']};return mockContent(input.prompt,input.schema);},capabilities:{demo:true},activation:async()=>({active}),requireActivation:async()=>{if(!active)throw Object.assign(Error('Awaiting activation'),{status:409})},enqueue:async id=>queued.push(id),saveImage:async(a,c,image)=>{const key=crypto.randomUUID();assets.set(key,{bytes:image.bytes,mime:image.mime});return {mime:image.mime,originalKey:key,previewKey:key,thumbnailKey:key,size:3}},readImage:async key=>assets.get(key),generateStyle:async()=>({bytes:new Uint8Array([1,2,3]),mime:'image/png'}),generateFrame:async(c,item,frame)=>{generated++;if(frame.position===brokenPosition)throw Error('Simulated provider failure');await new Promise(r=>setTimeout(r,2));return {bytes:new Uint8Array([1,2,3]),mime:'image/png'}}});
+function fixture(){const sqlite=new Database(':memory:');sqlite.exec(migration+pipeline);const queued=[],assets=new Map();let brokenPosition=0,generated=0,active=true,rejectValidation=false;const textCalls=[];const queryLog=[];const db={prepare(sql){queryLog.push(sql);return {bind(...args){const stmt=sqlite.prepare(sql);return {first:async()=>stmt.get(...args)||null,all:async()=>({results:stmt.all(...args)}),run:async()=>({meta:stmt.run(...args)}),execute:()=>stmt.reader?{results:stmt.all(...args)}:{results:[],meta:stmt.run(...args)}}}}}};const batchCalls=[];db.batch=async statements=>{batchCalls.push(statements.length);return sqlite.transaction(()=>statements.map(statement=>statement.execute()))();};const service=createV4Service({db,providerCatalog:async()=>mockProviders,generateText:async(input)=>{textCalls.push(input);if(input.schema.properties.valid&&rejectValidation)return {valid:false,issues:['Unsupported advice.']};return mockContent(input.prompt,input.schema);},capabilities:{demo:true},activation:async()=>({active}),requireActivation:async()=>{if(!active)throw Object.assign(Error('Awaiting activation'),{status:409})},enqueue:async id=>queued.push(id),saveImage:async(a,c,image)=>{const key=crypto.randomUUID();assets.set(key,{bytes:image.bytes,mime:image.mime});return {mime:image.mime,originalKey:key,previewKey:key,thumbnailKey:key,size:3}},readImage:async key=>assets.get(key),generateStyle:async()=>({bytes:new Uint8Array([1,2,3]),mime:'image/png'}),generateFrame:async(c,item,frame)=>{generated++;if(frame.position===brokenPosition)throw Error('Simulated provider failure');await new Promise(r=>setTimeout(r,2));return {bytes:new Uint8Array([1,2,3]),mime:'image/png'}}});
  const call=async(path,method='GET',input,account='A')=>{const url=new URL(`https://studio.test/api/v4${path}`);const res=await service.route(new Request(url,{method,body:input===undefined?undefined:JSON.stringify(input),headers:input===undefined?{}:{'Content-Type':'application/json'}}),account,url);return res.json()};
  async function drain(){let count=0;while(queued.length){const group=queued.splice(0);await Promise.all(group.map(id=>service.consume(id)));if(++count>15)throw Error('Queue did not settle')}}
  async function setup(profile={}){const c=(await call('/clinics','POST',{name:'River Dental'})).clinic;await call(`/clinics/${c.id}/profile`,'PUT',{revision:c.revision,confirmed:true,services:['General dentistry'],name:c.name,...profile});await call(`/clinics/${c.id}/styles`,'POST',{});await drain();const data=await call(`/clinics/${c.id}`);assert.equal(data.styles.length,3);await call(`/clinics/${c.id}/style-selection`,'PUT',{primaryStyleId:data.styles[0].id,secondaryStyleIds:[data.styles[1].id]});const {week}=await call(`/clinics/${c.id}/weeks`,'POST',{});await drain();return {clinic:(await call(`/clinics/${c.id}`)).clinic,week:(await call(`/weeks/${week.id}`)).week}}
- return {sqlite,service,call,queued,drain,setup,failFrame:n=>brokenPosition=n,setActive:v=>active=v,generated:()=>generated,textCalls,rejectValidation:v=>rejectValidation=v};}
+ return {sqlite,service,call,queued,drain,setup,queryLog,batchCalls,failFrame:n=>brokenPosition=n,setActive:v=>active=v,generated:()=>generated,textCalls,rejectValidation:v=>rejectValidation=v};}
 test('V4 source-backed copy validates for every card, angle and format; unverified claims fail closed',()=>{const c={id:'c',name:'River Dental',brand:{},profile:{facts:[{text:'We are open on Sundays.',status:'imported'}]}};for(const card of KNOWLEDGE_CARDS)for(const angle of card.engagementAngles)for(const format of ['carousel','post','story']){const copy=makeCopy(card,angle,format,c);assert.deepEqual(validateCopy(copy.frames,copy.caption,card,c),{valid:true})}const card=KNOWLEDGE_CARDS[0],copy=makeCopy(card,card.engagementAngles[0],'post',c);for(const unsafe of ['Guaranteed painless care.','99% success.','We are open on Sundays.','Salt cures every tooth infection.'])assert.equal(validateCopy([{heading:copy.frames[0].heading,body:unsafe}],copy.caption,card,c).valid,false);c.profile.facts[0].status='verified';assert.equal(validateCopy([{heading:copy.frames[0].heading,body:'We are open on Sundays.'}],copy.caption,card,c).valid,true)});
 test('V4 planning uses clinic and global cooldown history',()=>{const c={id:'c',profile:{services:[],location:'Kochi'}};const first=rankCards(c)[0],history=[{clinic_id:'c',knowledge_card_id:first.card.id,angle_id:first.angle.id,headline:first.angle.hook,region:'Kochi',generated_at:new Date().toISOString(),status:'published'}];assert.notEqual(rankCards(c,history)[0].card.id,first.card.id);const global={...history[0],clinic_id:'other'};assert.ok(rankCards(c,[global]).find(r=>r.angle.id===first.angle.id).score<first.score);assert.equal(weekStart('2026-10-03'),'2026-09-28')});
 test('V4 weekly pack prioritizes the hero, preserves parallel frames, then supports approval/export access',async()=>{const f=fixture(),{clinic,week}=await f.setup();assert.equal(week.items.length,7);assert.equal(new Set(week.items.map(i=>i.knowledge_card_id)).size,7);assert.deepEqual(week.items.map(i=>i.type),['carousel','carousel','post','story','story','story','story']);assert.equal((await f.call(`/clinics/${clinic.id}/weeks`,'POST',{})).week.id,week.id);await f.call(`/weeks/${week.id}/generate`,'POST',{});assert.equal(f.queued.length,7);assert.equal(f.sqlite.prepare("SELECT COUNT(*) n FROM v4_jobs WHERE kind='frame' AND priority=1").get().n,0);const first=f.queued.splice(0);await Promise.all(first.map(id=>f.service.consume(id)));const writing=f.queued.splice(0);await Promise.all(writing.map(id=>f.service.consume(id)));let current=(await f.call(`/weeks/${week.id}`)).week;assert.equal(current.heroReady,false);assert.equal(current.items[0].copy_status,'approved');assert.equal(current.items[0].frames.filter(i=>i.assetId).length,0);assert.equal(f.queued.length,15);await f.drain();current=(await f.call(`/weeks/${week.id}`)).week;assert.equal(current.ready,7);assert.equal(current.status,'ready');assert.equal(f.generated(),15);const asset=current.items[0].frames[0].assetId;await assert.rejects(f.call(`/assets/${asset}/original`,'GET',undefined,'B'),/Image not found/);await assert.rejects(f.call(`/weeks/${week.id}`,'GET',undefined,'B'),/Week not found/);await assert.rejects(f.call(`/clinics/${clinic.id}`,'GET',undefined,'B'),/Clinic not found/);const approved=(await f.call(`/weeks/${week.id}/approve`,'POST',{})).week;assert.equal(approved.status,'approved');assert.ok(approved.items.every(i=>i.status==='approved'));f.sqlite.close()});
@@ -176,4 +176,50 @@ test('Publication is explicit, persists after deletion, and skipped/replaced pla
  await f.call(`/weeks/${week.id}`,'DELETE');
  assert.equal(f.sqlite.prepare("SELECT COUNT(*) n FROM v4_usage WHERE content_id=? AND status='published'").get(item.id).n,1);
  f.sqlite.close();
+});
+
+
+test('weekly planning reuses shared history, styles and provider checks',async()=>{
+ const f=fixture();try{const {clinic}=await f.setup();f.queryLog.length=0;
+ const {week}=await f.call(`/clinics/${clinic.id}/weeks`,'POST',{weekStart:'2030-01-07'});
+ assert.equal(week.items.length,7);assert.equal(new Set(week.items.map(i=>i.knowledge_card_id)).size,7);
+ assert.equal(f.queryLog.filter(q=>q.startsWith('SELECT u.* FROM v4_usage')).length,1);
+ assert.equal(f.queryLog.filter(q=>q.startsWith('SELECT tasks_json FROM v4_provider_settings')).length,1);
+ assert.ok(f.queryLog.length<=25,`Expected at most 25 queries, got ${f.queryLog.length}`);
+ }finally{f.sqlite.close();}
+});
+
+test('weekly plan and content are persisted atomically in one batch',async()=>{
+ const f=fixture();try{const {clinic}=await f.setup();f.batchCalls.length=0;
+ const {week}=await f.call(`/clinics/${clinic.id}/weeks`,'POST',{weekStart:'2030-02-04'});
+ assert.deepEqual(f.batchCalls,[15,3]);assert.equal(week.items.length,7);
+ const latest=await f.call(`/clinics/${clinic.id}/weeks?latest=1`);assert.equal(latest.week.id,week.id);
+ const empty=(await f.call('/clinics','POST',{name:'Empty clinic'})).clinic;
+ assert.equal((await f.call(`/clinics/${empty.id}/weeks?latest=1`)).week,null);
+ await assert.rejects(f.call(`/clinics/${clinic.id}/weeks?latest=1`,'GET',undefined,'B'),/Clinic not found/);
+ }finally{f.sqlite.close();}
+});
+test('competing requests for the same week produce only one complete plan',async()=>{
+ const f=fixture();try{const {clinic}=await f.setup();const plans=await Promise.all([1,2].map(()=>f.call(`/clinics/${clinic.id}/weeks`,'POST',{weekStart:'2030-03-04'})));
+ assert.equal(plans[0].week.id,plans[1].week.id);assert.equal(plans[0].week.items.length,7);
+ assert.equal(f.sqlite.prepare('SELECT COUNT(*) n FROM v4_content WHERE week_id=?').get(plans[0].week.id).n,7);
+ }finally{f.sqlite.close();}
+});
+test('a failed planning batch leaves no empty week or partial content',async()=>{
+ const f=fixture();try{const {clinic}=await f.setup();const before=f.sqlite.prepare('SELECT COUNT(*) n FROM v4_content').get().n;
+ f.sqlite.exec("CREATE TRIGGER break_plan BEFORE INSERT ON v4_usage BEGIN SELECT RAISE(ABORT,'simulated failure'); END;");
+ await assert.rejects(f.call(`/clinics/${clinic.id}/weeks`,'POST',{weekStart:'2030-04-01'}),/simulated failure/);
+ assert.equal(f.sqlite.prepare("SELECT COUNT(*) n FROM v4_weeks WHERE week_start='2030-04-01'").get().n,0);
+ assert.equal(f.sqlite.prepare('SELECT COUNT(*) n FROM v4_content').get().n,before);
+ }finally{f.sqlite.close();}
+});
+
+test('library bundles weeks and items while review batches content and jobs',async()=>{
+ const f=fixture();try{const {clinic,week}=await f.setup();f.batchCalls.length=0;
+ const library=await f.call(`/clinics/${clinic.id}/library?weeks=1`);
+ assert.equal(library.items.length,7);assert.equal(library.weeks[0].id,week.id);assert.deepEqual(f.batchCalls,[2]);
+ f.batchCalls.length=0;const review=await f.call(`/content/${week.items[0].id}`);
+ assert.equal(review.item.id,week.items[0].id);assert.deepEqual(f.batchCalls,[2]);
+ assert.equal(review.item.published,false);
+ }finally{f.sqlite.close();}
 });

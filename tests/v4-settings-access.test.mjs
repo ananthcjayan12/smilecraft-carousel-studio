@@ -4,7 +4,7 @@ import {readFile} from 'node:fs/promises';
 import {shell} from '../web/v4/ui.js';
 const source=await readFile(new URL('../web/v4/pages/settings.js',import.meta.url),'utf8');
 const url=code=>'data:text/javascript;base64,'+Buffer.from(code).toString('base64');
-const app=url('export const go=()=>{},toast=()=>{},refreshClinic=()=>{};');
+const app=url('export const go=()=>{},toast=()=>{},refreshClinic=()=>{},ensureWeek=()=>{};');
 const api=url(`export const calls=[];export async function api(path){calls.push(path);if(path==='/providers')return {tasks:Object.fromEntries(['writing','validation','style','artwork'].map(t=>[t,{provider:'openai',model:t==='style'||t==='artwork'?'gpt-image-2.5-flare':'writer'}])),providers:{openai:{available:true,label:'OpenAI',models:[['gpt-image-2.5-flare','Flare']],writingModels:[['writer','Writer']]}}};if(path==='/api/admin/accounts')return {accounts:[{id:'client',email:'client@example.com',name:'Clinic',credits:900,planId:'founding-clinic'}]};if(path==='/api/plans')return {plans:[{id:'founding-clinic',monthlyCredits:900}]};throw Error(path);}`);
 let rewritten=source.replace("'../../image-options.js'",JSON.stringify(new URL('../web/image-options.js',import.meta.url).href)).replace("'../ui.js'",JSON.stringify(new URL('../web/v4/ui.js',import.meta.url).href)).replace("'../api.js'",JSON.stringify(api)).replace("'../app.js'",JSON.stringify(app));
 const settings=await import(url(rewritten)),mock=await import(api);
