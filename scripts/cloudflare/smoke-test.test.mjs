@@ -4,7 +4,12 @@ import worker from '../../cloudflare/worker.mjs';
 import { smokeTest } from './smoke-test.mjs';
 
 const origin = 'https://smoke.example';
-const environment = () => ({ APP_ORIGIN: origin, DB: { prepare: () => ({ first: async () => ({ ready: 1 }) }) } });
+const landingHtml = '<!doctype html><html><head><title>Srshti · Your weekly clinic content studio</title></head><body><div id="app"></div><script src="/v4-core.js"></script></body></html>';
+const environment = () => ({
+  APP_ORIGIN: origin,
+  DB: { prepare: () => ({ first: async () => ({ ready: 1 }) }) },
+  STATIC: { fetch: async () => new Response(landingHtml, { headers: { 'Content-Type': 'text/html; charset=utf-8' } }) }
+});
 
 for (const configured of [true, false]) {
   test(`smoke check accepts the actual Worker login page with Google sign-in ${configured ? 'configured' : 'pending'}`, async () => {
@@ -16,19 +21,19 @@ for (const configured of [true, false]) {
   });
 }
 
-test('smoke check rejects an unrelated HTML page even if it contains the old banner', async () => {
+test('smoke check rejects an unrelated public landing page', async () => {
   const env = environment();
-  await assert.rejects(smokeTest(origin, { attempts: 1, request: (url, options) => new URL(url).pathname === '/login'
+  await assert.rejects(smokeTest(origin, { attempts: 1, request: (url, options) => new URL(url).pathname === '/'
     ? Promise.resolve(new Response('<html>Your creative workspace</html>', { headers: { 'Content-Type': 'text/html' } }))
-    : worker.fetch(new Request(url, options), env) }), /Sign-in page was not served \(HTTP 200\)/);
+    : worker.fetch(new Request(url, options), env) }), /Public landing page was not served \(HTTP 200\)/);
 });
 
-test('smoke check rejects a failed response containing the real sign-in markup', async () => {
+test('smoke check rejects a failed response containing the real landing markup', async () => {
   const env = environment();
   await assert.rejects(smokeTest(origin, { attempts: 1, request: async (url, options) => {
     const response = await worker.fetch(new Request(url, options), env);
-    return new URL(url).pathname === '/login' ? new Response(await response.text(), { status: 503, headers: response.headers }) : response;
-  } }), /Sign-in page was not served \(HTTP 503\)/);
+    return new URL(url).pathname === '/' ? new Response(await response.text(), { status: 503, headers: response.headers }) : response;
+  } }), /Public landing page was not served \(HTTP 503\)/);
 });
 
 test('smoke check still rejects an exposed private API', async () => {
