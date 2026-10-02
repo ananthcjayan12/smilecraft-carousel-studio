@@ -22,7 +22,7 @@ test('style generation charges once after validation and returns a board', async
   const { env, ledger, restore } = setup(200);
   try {
     const result = await renderStyleBoard(env, 'account-1', client, input);
-    assert.match(result.image, /^data:image\/png;base64,/);
+    assert.match(result.image, /^data:image\/webp;base64,/);
     assert.equal(ledger.length, 1);
     assert.equal(ledger[0].values[1], 'account-1');
     assert.match(ledger[0].sql, /style_generation/);
@@ -53,7 +53,7 @@ test('style variation sends clean and annotated client references without fetchi
   };
   try {
     const result = await renderStyleBoard(env,'account-1',{...client,businessPackId:'salon'},{...input,logoImage:'',sourceTemplateId:'custom:one',referenceImage:logo,moodImage:logo,revisionNotes:'Slide 3: lighten the marked background',aspectRatio:'1:1'});
-    assert.match(result.image,/^data:image\/png;base64,/);
+    assert.match(result.image,/^data:image\/webp;base64,/);
     assert.equal(ledger.length,1);
   } finally {restore();}
 });
