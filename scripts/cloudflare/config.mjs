@@ -1,7 +1,7 @@
 export function validate(env) {
   if (!env.CLOUDFLARE_API_TOKEN) throw new Error('Missing CLOUDFLARE_API_TOKEN.');
   if (!/^[a-f0-9]{32}$/i.test(env.CLOUDFLARE_ACCOUNT_ID || '')) throw new Error('CLOUDFLARE_ACCOUNT_ID must be 32 hex characters.');
-  const worker = env.WORKER_NAME || 'carousel-studio-v3';
+  const worker = env.WORKER_NAME || 'carousel-studio-v4';
   const database = env.D1_DATABASE_NAME || `${worker}-db`;
   const bucket = env.R2_BUCKET_NAME || `${worker}-assets`;
   const queue = env.QUEUE_NAME || `${worker}-jobs`;
