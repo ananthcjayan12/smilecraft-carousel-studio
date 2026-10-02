@@ -17,11 +17,11 @@ test('Cloudflare bootstrap creates D1, private R2 and both queues once', async (
     const pathname = new URL(url).pathname.replace(/^\/client\/v4\/accounts\/[^/]+/, '');
     let result;
     if (pathname === '/d1/database' && init.method === 'GET') result = database ? [database] : [];
-    else if (pathname === '/d1/database' && init.method === 'POST') { database = { name: 'carousel-studio-v3-db', uuid: 'db-id' }; result = database; created.push('db'); }
-    else if (pathname === '/r2/buckets/carousel-studio-v3-assets') {
+    else if (pathname === '/d1/database' && init.method === 'POST') { database = { name: 'carousel-studio-v4-db', uuid: 'db-id' }; result = database; created.push('db'); }
+    else if (pathname === '/r2/buckets/carousel-studio-v4-assets') {
       if (!bucket) return Response.json({ success: false }, { status: 404 });
       result = bucket;
-    } else if (pathname === '/r2/buckets' && init.method === 'POST') { bucket = { name: 'carousel-studio-v3-assets' }; result = bucket; created.push('bucket'); }
+    } else if (pathname === '/r2/buckets' && init.method === 'POST') { bucket = { name: 'carousel-studio-v4-assets' }; result = bucket; created.push('bucket'); }
     else if (pathname.endsWith('/domains/managed')) result = { enabled: publicBucket };
     else if (pathname.endsWith('/domains/custom')) result = { domains: [] };
     else if (pathname === '/queues' && init.method === 'GET') result = [...queues.values()];
@@ -40,8 +40,8 @@ test('Cloudflare bootstrap creates D1, private R2 and both queues once', async (
     assert.equal(created.length, 4);
     const config = JSON.parse(await readFile('wrangler.generated.json', 'utf8'));
     assert.equal(config.d1_databases[0].database_id, 'db-id');
-    assert.equal(config.queues.consumers[0].dead_letter_queue, 'carousel-studio-v3-dead');
-    assert.equal(config.vars.APP_ORIGIN, 'https://carousel-studio-v3.example.workers.dev');
+    assert.equal(config.queues.consumers[0].dead_letter_queue, 'carousel-studio-v4-dead');
+    assert.equal(config.vars.APP_ORIGIN, 'https://carousel-studio-v4.example.workers.dev');
     assert.equal(config.vars.CLOUDFLARE_API_TOKEN, undefined);
     const second = await provision(env, fetcher);
     assert.deepEqual(second.created, { database: false, bucket: false, queue: false, deadQueue: false });
