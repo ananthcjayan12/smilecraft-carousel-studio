@@ -31,10 +31,8 @@ const importedCards=DENTAL_LIBRARY.map(row=>({
 }));
 export const KNOWLEDGE_CARDS=[...LAUNCH_CARDS,...importedCards];
 const topicKey=card=>String(card?.topicClusterId||card?.topic||'').toLowerCase().replace(/[^a-z0-9]+/g,' ').trim();
-export const TOPIC_RESERVATION_DAYS=14;
-const reservesTopic=(h,now)=>h.status==='published'||(['planned','generated','approved'].includes(h.status)&&now-Date.parse(h.generated_at)<TOPIC_RESERVATION_DAYS*86400000);
-export function usedByClinic(card,clinic,history,now=Date.now()){
- return history.some(h=>h.clinic_id===clinic.id&&reservesTopic(h,now)&&(h.knowledge_card_id===card.id||
+export function usedByClinic(card,clinic,history){
+ return history.some(h=>h.clinic_id===clinic.id&&(h.knowledge_card_id===card.id||
   (cardById(h.knowledge_card_id)&&topicKey(cardById(h.knowledge_card_id))===topicKey(card))));
 }
 export const cardById=id=>KNOWLEDGE_CARDS.find(c=>c.id===id);
@@ -42,11 +40,11 @@ const tokens=text=>new Set(String(text).toLowerCase().match(/[a-z]{3,}/g)||[]);
 export function similarity(a,b){const x=tokens(a),y=tokens(b);const intersection=[...x].filter(t=>y.has(t)).length;return intersection/Math.max(1,new Set([...x,...y]).size);}
 export function rankCards(clinic,history=[],excluded=[],format='carousel',now=Date.now()) {
  const services=(clinic.profile.services||[]).join(' ').toLowerCase(),emphasis=String(clinic.profile.emphasis||'').toLowerCase();
- return KNOWLEDGE_CARDS.filter(c=>c.suitableFormats.includes(format)&&!excluded.includes(c.id)&&!excluded.some(id=>topicKey(cardById(id))===topicKey(c))&&!usedByClinic(c,clinic,history,now)).flatMap(c=>c.engagementAngles.map(a=>{
+ return KNOWLEDGE_CARDS.filter(c=>c.suitableFormats.includes(format)&&!excluded.includes(c.id)&&!excluded.some(id=>topicKey(cardById(id))===topicKey(c))&&!usedByClinic(c,clinic,history)).flatMap(c=>c.engagementAngles.map(a=>{
   let score=20+(c.serviceTags.some(s=>services.includes(s.toLowerCase()))?8:0)+(emphasis&&c.serviceTags.some(s=>s.toLowerCase().includes(emphasis))?12:0);
   if(clinic.profile.goal==='Educate existing patients'&&c.pillar==='prevention')score+=5;
   if(clinic.profile.goal==='Build trust in our treatments'&&c.pillar==='treatment')score+=5;
-  for(const h of history){if(h.status!=='published')continue;const days=(now-Date.parse(h.generated_at))/86400000;if(days<0)continue;const own=h.clinic_id===clinic.id;
+  for(const h of history){const days=(now-Date.parse(h.generated_at))/86400000;if(days<0)continue;const own=h.clinic_id===clinic.id;
    if(h.knowledge_card_id===c.id&&own&&days<90)score-=80;
    if(h.angle_id===a.id&&own&&days<45)score-=50;
    if(h.knowledge_card_id===c.id&&days<28)score-=h.region===clinic.profile.location?20:8;

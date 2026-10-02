@@ -1,3 +1,4 @@
+import {normalizeImageOptions} from '../web/image-options.js';
 import { AsyncLocalStorage } from 'node:async_hooks';
 const generationContext = new AsyncLocalStorage();
 import { styleVariantInstructions } from '../web/style-variant.js';
@@ -118,24 +119,25 @@ async function fetchJson(url, options, timeoutMs = 180000) {
   }
 }
 
-async function openaiImage(prompt, reference, logo, requestedModel, master, format = 'slide', aspectRatio = '4:5') {
+async function openaiImage(prompt, reference, logo, requestedModel, master, format = 'slide', aspectRatio = '4:5', options = {}) {
   if (!process.env.OPENAI_API_KEY) throw Object.assign(new Error('OpenAI generation requires OPENAI_API_KEY in the server environment.'), { status: 409 });
   const model = limit(requestedModel, 80).trim() || process.env.OPENAI_IMAGE_MODEL || 'gpt-image-2';
   const form = new FormData();
   form.append('model', model);
   form.append('prompt', prompt);
   form.append('size', format === 'board' ? '1536x1024' : openaiImageSize(model, aspectRatio));
-  form.append('quality', process.env.OPENAI_IMAGE_QUALITY || 'high');
+  form.append('quality', normalizeImageOptions({provider:'openai',model,quality:options.quality||process.env.OPENAI_IMAGE_QUALITY}).quality);
   form.append('output_format', 'png');
   form.append('image[]', new Blob([reference.bytes], { type: reference.mime }), `template.${reference.mime.split('/')[1]}`);
   if (master) form.append('image[]', new Blob([master.bytes], { type: master.mime }), `master.${master.mime.split('/')[1]}`);
   for (const [i, ref] of (generationContext.getStore()?.references || []).entries()) form.append('image[]', new Blob([ref.bytes], {type:ref.mime}), `design-${i}.png`);
   if (logo) form.append('image[]', new Blob([logo.bytes], { type: logo.mime }), `logo.${logo.mime.split('/')[1]}`);
   const json = await fetchJson('https://api.openai.com/v1/images/edits', { method: 'POST', headers: { Authorization: `Bearer ${process.env.OPENAI_API_KEY}` }, body: form });
+  await writeImageLog(options.workDir, {timestamp:new Date().toISOString(),provider:'openai',model,kind:'api-usage',contentId:options.contentId,jobId:options.jobId,slideNumber:options.slideNumber,quality:form.get('quality'),size:form.get('size'),usage:json.usage||null});
   return outputDataUrl(json.data?.[0]?.b64_json, `image/${json.output_format || 'png'}`);
 }
 
-async function geminiImage(prompt, reference, logo, requestedModel, master, format = 'slide', aspectRatio = '4:5') {
+async function geminiImage(prompt, reference, logo, requestedModel, master, format = 'slide', aspectRatio = '4:5', options = {}) {
   if (!process.env.GEMINI_API_KEY) throw Object.assign(new Error('Gemini generation requires GEMINI_API_KEY in the server environment.'), { status: 409 });
   const model = limit(requestedModel, 100).trim() || process.env.GEMINI_IMAGE_MODEL || 'gemini-3.1-flash-image';
   const input = [{ type: 'text', text: prompt }, { type: 'image', mime_type: reference.mime, data: reference.base64 }];
@@ -145,7 +147,7 @@ async function geminiImage(prompt, reference, logo, requestedModel, master, form
   const json = await fetchJson('https://generativelanguage.googleapis.com/v1beta/interactions', {
     method: 'POST',
     headers: { 'x-goog-api-key': process.env.GEMINI_API_KEY, 'Content-Type': 'application/json' },
-    body: JSON.stringify({ model, input, response_format: { type: 'image', mime_type: 'image/png', aspect_ratio: format === 'board' ? '4:3' : (imageFormat(aspectRatio).geminiRatio || imageFormat(aspectRatio).ratio), image_size: '2K' } }),
+    body: JSON.stringify({ model, input, response_format: { type: 'image', mime_type: 'image/png', aspect_ratio: format === 'board' ? '4:3' : (imageFormat(aspectRatio).geminiRatio || imageFormat(aspectRatio).ratio), image_size: normalizeImageOptions({provider:'gemini',model,imageSize:options.imageSize}).imageSize } }),
   });
   return outputDataUrl(findBase64Image(json), 'image/png');
 }
@@ -180,7 +182,7 @@ async function writeImageLog(workDir, details) {
   if (!workDir) return undefined;
   try {
     const directory = path.join(workDir, 'generation-logs', 'image'); await mkdir(directory, { recursive: true });
-    const stamp = new Date().toISOString().replace(/[:.]/g, '-'); const file = path.join(directory, `${details.provider}-${stamp}.json`);
+    const stamp = new Date().toISOString().replace(/[:.]/g, '-'); const file = path.join(directory, `${details.provider}-${stamp}-${crypto.randomUUID()}.json`);
     await writeFile(file, JSON.stringify(details, null, 2)); return file;
   } catch { return undefined; }
 }
@@ -252,8 +254,8 @@ export async function generateSlideImage(data) {
   const started = Date.now();
   try {
     let image;
-    if (data.provider === 'openai') image = await openaiImage(prompt, reference, logo, data.model, master, 'slide', data.aspectRatio);
-    else if (data.provider === 'gemini') image = await geminiImage(prompt, reference, logo, data.model, master, 'slide', data.aspectRatio);
+    if (data.provider === 'openai') image = await openaiImage(prompt, reference, logo, data.model, master, 'slide', data.aspectRatio, data);
+    else if (data.provider === 'gemini') image = await geminiImage(prompt, reference, logo, data.model, master, 'slide', data.aspectRatio, data);
     else if (data.provider === 'codex') image = await codexImage(prompt, reference, logo, data.model, master, 'slide', data.aspectRatio);
     else if (data.provider === 'antigravity') image = await antigravityImage(prompt, reference, logo, data.model, master, 'slide', data.aspectRatio);
     else throw Object.assign(new Error('Choose a supported image provider.'), { status: 400 });
@@ -283,19 +285,19 @@ DESIGN DIRECTION: ${JSON.stringify(limit(data.direction, 500))}
 Use the exact supplied logo consistently and tastefully when present. If an optional mood/reference image is supplied, interpret its mood and art direction without copying protected branding. Make the five panels a reusable system: 1) bold hook, 2) educational/explanatory, 3) benefit or proof, 4) process/details, 5) clear CTA/contact layout. Use short neutral placeholder labels such as “Headline”, “Key message”, and “Call to action” only; do not invent prices, facts, phone numbers, addresses, testimonials, or claims. The result must feel native to the stated industry and visibly different from a dental clinic.
 
 Keep all five cards fully visible, evenly separated, straight-on, and easy to crop. No mockups, hands, devices, perspective, watermark, or extra panels. This is a professional design-system board, not a finished campaign.`;
-  if (data.provider === 'openai') return openaiImage(prompt, reference, logo, data.model, mood, 'board');
-  if (data.provider === 'gemini') return geminiImage(prompt, reference, logo, data.model, mood, 'board');
+  if (data.provider === 'openai') return openaiImage(prompt, reference, logo, data.model, mood, 'board', '4:5', data);
+  if (data.provider === 'gemini') return geminiImage(prompt, reference, logo, data.model, mood, 'board', '4:5', data);
   if (data.provider === 'codex') return codexImage(prompt, reference, logo, data.model, mood, 'board');
   if (data.provider === 'antigravity') return antigravityImage(prompt, reference, logo, data.model, mood, 'board');
   throw Object.assign(new Error('Choose a supported image provider.'), { status: 400 });
 }
 
 // V4 supplies its own dental/language prompt and the full reference set.
-export async function generateReferenceImage({provider, model, agyModel, prompt, referenceImages, logoImage, signal}) {
+export async function generateReferenceImage({provider, model, agyModel, prompt, referenceImages, logoImage, signal, quality, imageSize}) {
   const [reference, ...references] = referenceImages.map(value=>parseDataUrl(value,'Design reference'));
   const logo=logoImage?parseDataUrl(logoImage,'Clinic logo'):null;
   const generate={openai:openaiImage,gemini:geminiImage,codex:codexImage,antigravity:antigravityImage}[provider];
   if(!generate)throw new Error('Unsupported image provider.');
-  return generationContext.run({references,signal,agyModel},()=>{signal?.throwIfAborted();return generate(prompt,reference,logo,compatibleModel(provider,model,'image'),null,'board');});
+  return generationContext.run({references,signal,agyModel},()=>{signal?.throwIfAborted();return generate(prompt,reference,logo,compatibleModel(provider,model,'image'),null,'board','4:5',{quality,imageSize});});
 }
 export const withImageCancellation=(signal,work,{agyModel}={})=>generationContext.run({signal,agyModel},work);

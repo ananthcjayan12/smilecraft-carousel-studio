@@ -1,4 +1,3 @@
-import {normalizeImageOptions} from '../../web/image-options.js';
 import {STYLE_REFERENCES} from './image-prompts.mjs';
 import { KNOWLEDGE_CARDS, cardById, rankCards } from './knowledge.mjs';
 import {TASKS,sourceBrief,contentContext,briefPrompt,writingPrompt,validationPrompt,briefSchema,writingSchema,validationSchema,checkDraft} from './content-prompts.mjs';
@@ -29,7 +28,7 @@ export function createV4Service(platform){
  const db=platform.db, first=(sql,...args)=>db.prepare(sql).bind(...args).first(), all=async(sql,...args)=>(await db.prepare(sql).bind(...args).all()).results;
  const run=(sql,...args)=>db.prepare(sql).bind(...args).run();
  const clinic=async(account,clinicId)=>{const c=viewClinic(await first('SELECT * FROM v4_clinics WHERE account_id=? AND id=?',account,clinicId));if(!c)throw fail('Clinic not found.',404);return c;};
- const content=async(account,itemId)=>{const c=viewContent(await first('SELECT * FROM v4_content WHERE account_id=? AND id=?',account,itemId));if(!c)throw fail('Content not found.',404);c.published=Boolean(await first("SELECT id FROM v4_usage WHERE account_id=? AND content_id=? AND status='published' AND knowledge_card_id=? AND headline=? LIMIT 1",account,itemId,c.knowledge_card_id,c.topic));return c;};
+ const content=async(account,itemId)=>{const c=viewContent(await first('SELECT * FROM v4_content WHERE account_id=? AND id=?',account,itemId));if(!c)throw fail('Content not found.',404);return c;};
  async function providerSettings(account,refresh=false){
   const catalog=platform.providerCatalog?await platform.providerCatalog(refresh):{};
   const stored=parse((await first('SELECT tasks_json FROM v4_provider_settings WHERE account_id=?',account))?.tasks_json);
@@ -49,7 +48,7 @@ export function createV4Service(platform){
   return {...choice};
  }
  async function job(account,clinicId,kind,input,{weekId=null,contentId=null,priority=0,key=id()}={}){
-  const existing=await first('SELECT * FROM v4_jobs WHERE account_id=? AND request_key=?',account,key);if(existing&&!['cancelled','failed'].includes(existing.status))return existing;if(existing)key=key+':'+id();
+  const existing=await first('SELECT * FROM v4_jobs WHERE account_id=? AND request_key=?',account,key);if(existing&&existing.status!=='cancelled')return existing;if(existing)key=key+':'+id();
   const task=kind==='frame'?'artwork':kind==='brief'?'writing':kind;
   const generation=Object.hasOwn(TASKS,task)?await taskChoice(account,task):undefined;
   const validationGeneration=kind==='writing'?await taskChoice(account,'validation'):undefined;
@@ -83,7 +82,7 @@ export function createV4Service(platform){
  function chooseStyle(c,type,position){const selection=c.styleSelection;return type==='story'?(selection.secondaryStyleIds?.[1]||selection.primaryStyleId):position>0?(selection.secondaryStyleIds?.[0]||selection.primaryStyleId):selection.primaryStyleId;}
  async function newItem(account,c,weekId,type,position,excluded=[],input={}){
   const custom=Boolean(text(input.customBrief,8000)||text(input.topic,300));
-  const history=custom?[]:await all("SELECT u.* FROM v4_usage u WHERE (u.clinic_id=? OR u.generated_at>?) AND (u.status='published' OR EXISTS(SELECT 1 FROM v4_content c WHERE c.id=u.content_id AND c.account_id=u.account_id AND c.knowledge_card_id=u.knowledge_card_id AND c.status!='skipped')) ORDER BY u.generated_at DESC",c.id,new Date(Date.now()-90*86400000).toISOString());
+  const history=custom?[]:await all('SELECT * FROM v4_usage WHERE clinic_id=? OR generated_at>? ORDER BY generated_at DESC',c.id,new Date(Date.now()-90*86400000).toISOString());
   const choice=custom?null:rankCards(c,history,excluded,type)[0];if(!custom&&!choice)throw fail('No eligible source material is available.');
   const itemId=id(),styleId=text(input.styleId)||chooseStyle(c,type,position),brief=sourceBrief(choice?.card,choice?.angle,c,input),language=c.profile.language||'English';
   if(input.contactKeys&&(!Array.isArray(input.contactKeys)||input.contactKeys.some(k=>!['phone','whatsapp','address','website','bookingUrl'].includes(k))))throw fail('Choose valid CTA contact fields.');
@@ -198,7 +197,7 @@ export function createV4Service(platform){
      if(typeof report.valid!=='boolean'||!Array.isArray(report.issues)||report.valid&&report.issues.length)throw fail('The validator returned an invalid review.');
      const validation={valid:report.valid,issues:report.issues.map(i=>text(i,600)),at:now(),provider:(row.kind==='writing'?input.validationGeneration:input.generation).provider};
      await run("UPDATE v4_content SET topic=?,brief_json=?,frames_json=?,caption=?,copy_status=?,validation_json=?,status='copy_review' WHERE id=? AND account_id=? AND revision=? AND EXISTS(SELECT 1 FROM v4_jobs WHERE id=? AND status='running')",item.topic,JSON.stringify(item.brief),JSON.stringify(item.frames),item.caption,validation.valid?'validated':'rejected',JSON.stringify(validation),item.id,account,input.revision,row.id);
-     await run("UPDATE v4_usage SET headline=? WHERE content_id=? AND account_id=? AND status!='published'",item.frames[0].heading,item.id,account);
+     await run('UPDATE v4_usage SET headline=? WHERE content_id=? AND account_id=?',item.frames[0].heading,item.id,account);
      if(validation.valid&&item.week_id&&input.autoArtwork){await ensureRunning();await approveCopy(account,await content(account,item.id));}
     }
     await updateWeek(account,item.week_id);result={contentId:item.id};
@@ -254,7 +253,7 @@ export function createV4Service(platform){
   const item=await content(account,itemId);if(!item.frames.length||!item.frames.every(f=>f.assetId))throw fail('Wait for all artwork before approving.');
   if(item.copy_status!=='approved')throw fail('Approve the copy before approving artwork.');
   await run("UPDATE v4_content SET status='approved',frames_json=? WHERE id=? AND account_id=?",JSON.stringify(item.frames.map(f=>({...f,approved:true}))),itemId,account);
-  await run("UPDATE v4_usage SET status='approved' WHERE content_id=? AND account_id=? AND status!='published'",itemId,account);await updateWeek(account,item.week_id);return {item:await content(account,itemId)};
+  await run("UPDATE v4_usage SET status='approved' WHERE content_id=? AND account_id=?",itemId,account);await updateWeek(account,item.week_id);return {item:await content(account,itemId)};
  }
  async function route(request,account,url){
   const parts=url.pathname.slice('/api/v4'.length).split('/').filter(Boolean),method=request.method;
@@ -272,7 +271,7 @@ export function createV4Service(platform){
     for(const task of Object.keys(TASKS)){
      const choice=input.tasks?.[task],entry=catalog[choice?.provider],kind=['style','artwork'].includes(task)?'models':'writingModels';
      if(!entry?.available||!entry[kind]?.some(([id])=>id===choice.model))throw fail(`Choose an available provider and supported model for ${TASKS[task]}.`);
-     tasks[task]={provider:choice.provider,model:choice.model,...(['style','artwork'].includes(task)?normalizeImageOptions(choice):{})};
+     tasks[task]={provider:choice.provider,model:choice.model};
     }
     await run('INSERT INTO v4_provider_settings(account_id,tasks_json,updated_at) VALUES(?,?,?) ON CONFLICT(account_id) DO UPDATE SET tasks_json=excluded.tasks_json,revision=revision+1,updated_at=excluded.updated_at',account,JSON.stringify(tasks),now());return json(await providerSettings(account));
    }
@@ -350,22 +349,9 @@ export function createV4Service(platform){
     }else await writeItem(account,item);
     return json(await getContent(account,item.id));
    }
-   if(parts[2]==='generate'&&method==='POST'){
-    await platform.requireActivation(account);
-    // An explicit request resumes this item even when its week was stopped.
-    if(item.week_id)await run("UPDATE v4_weeks SET status='planned' WHERE id=? AND account_id=? AND status='cancelled'",item.week_id,account);
-    if(item.week_id&&item.copy_status==='validated')await approveCopy(account,item);
-    else await queueItem(account,item,0);
-    return json(await getContent(account,item.id));
-   }
+   if(parts[2]==='generate'&&method==='POST'){await platform.requireActivation(account);await queueItem(account,item,0);return json(await getContent(account,item.id));}
    if(parts[2]==='approve-copy'&&method==='POST'){await approveCopy(account,item);return json(await getContent(account,item.id));}
    if(parts[2]==='approve'&&method==='POST')return json(await approveItem(account,item.id));
-   if(parts[2]==='publish'&&method==='POST'){
-    if(item.published)return json(await getContent(account,item.id));
-    if(item.status==='skipped'||!item.frames.length||!item.frames.every(f=>f.assetId))throw fail('Finish the artwork before marking it as published.');
-    await run("INSERT OR IGNORE INTO v4_usage(id,account_id,clinic_id,content_id,knowledge_card_id,angle_id,recipe_id,region,headline,status,generated_at) VALUES(?,?,?,?,?,?,?,?,?,'published',?)",`published:${item.id}:${item.revision}`,account,c.id,item.id,item.knowledge_card_id,item.angle_id,item.recipe_id,c.profile.location||'',item.topic,now());
-    return json(await getContent(account,item.id));
-   }
    if(parts[2]==='cancel'&&method==='POST'){
     const jobs=await all("SELECT id FROM v4_jobs WHERE account_id=? AND content_id=? AND status IN ('queued','running')",account,item.id);
     for(const j of jobs){await run("UPDATE v4_jobs SET status='cancelled',request_key=request_key||':cancelled:'||id,error='Generation cancelled.' WHERE id=?",j.id);controllers.get(j.id)?.abort();}
@@ -400,8 +386,8 @@ export function createV4Service(platform){
     if(parts[2]==='brief'&&Number(input.revision)!==item.revision)throw fail('Content changed. Reload before editing.',409);
     let brief,cardId='',angleId='';
     if(parts[2]==='replace'){
-     const others=item.week_id?(await getWeek(account,item.week_id)).week.items.filter(i=>i.status!=='skipped').map(i=>i.knowledge_card_id):[item.knowledge_card_id];
-     const choice=rankCards(c,await all("SELECT u.* FROM v4_usage u WHERE (u.clinic_id=? OR u.generated_at>?) AND (u.status='published' OR EXISTS(SELECT 1 FROM v4_content c WHERE c.id=u.content_id AND c.account_id=u.account_id AND c.knowledge_card_id=u.knowledge_card_id AND c.status!='skipped'))",c.id,new Date(Date.now()-90*86400000).toISOString()),others,item.type)[0];if(!choice)throw fail('No new topic is available.');
+     const others=item.week_id?(await getWeek(account,item.week_id)).week.items.map(i=>i.knowledge_card_id):[item.knowledge_card_id];
+     const choice=rankCards(c,await all('SELECT * FROM v4_usage WHERE clinic_id=? OR generated_at>?',c.id,new Date(Date.now()-90*86400000).toISOString()),others,item.type)[0];if(!choice)throw fail('No new topic is available.');
      brief=sourceBrief(choice.card,choice.angle,c);cardId=choice.card.id;angleId=choice.angle.id;
     }else{
      if(!text(input.topic,300)&&!text(input.customBrief,8000))throw fail('Enter a content topic.');
@@ -410,7 +396,7 @@ export function createV4Service(platform){
     }
     const styleId=text(input.styleId)||item.style_id;await styleFor(account,c,{style_id:styleId});await taskChoice(account,'writing');
     const revision=item.revision+1;const saved=await run("UPDATE v4_content SET knowledge_card_id=?,angle_id=?,recipe_id=?,style_id=?,topic=?,brief_json=?,language=?,caption='',frames_json='[]',copy_status='draft',validation_json='{}',context_json='{}',copy_approved_at=NULL,status=?,revision=? WHERE id=? AND account_id=? AND revision=?",cardId,angleId,`${item.type}:${brief.angle}`,styleId,brief.topic,JSON.stringify(brief),c.profile.language||'English',parts[2]==='replace'?'planned':'briefing',revision,item.id,account,item.revision);if(!saved.meta.changes)throw fail('Content changed. Reload before editing.',409);
-    await run("UPDATE v4_usage SET status='rejected' WHERE content_id=? AND account_id=? AND status!='published'",item.id,account);
+    await run("UPDATE v4_usage SET status='rejected' WHERE content_id=? AND account_id=?",item.id,account);
     if(cardId)await recordUsage(account,c,item.id,cardId,angleId,`${item.type}:${brief.angle}`,brief.topic,'planned');
     if(item.week_id)await run("UPDATE v4_weeks SET status='planned',approved_at=NULL WHERE id=? AND account_id=?",item.week_id,account);
     if(parts[2]!=='replace')await job(account,c.id,'brief',{revision,clinic:c,autoWrite:true},{weekId:item.week_id,contentId:item.id,key:`brief:${item.id}:${revision}`});return json(await getContent(account,item.id));

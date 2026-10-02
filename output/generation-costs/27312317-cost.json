@@ -1,0 +1,57 @@
+{
+  "content_id": "27312317-a76d-4273-b426-57a9e3f2f564",
+  "model": "gpt-image-2.5-flare",
+  "quality": "high",
+  "size": "1024x1280",
+  "pricing_per_million_usd": {
+    "input_text": 5,
+    "input_image": 8,
+    "output_image": 30
+  },
+  "slides": [
+    {
+      "slide": 1,
+      "input_text_tokens": 948,
+      "input_image_tokens": 1634,
+      "output_tokens": 1510,
+      "cost_usd": 0.063112,
+      "log": "storage/generation-logs/image/openai-2026-10-02T14-12-55-654Z-dcd10fd9-b9c7-4c74-bdfb-f55f68479373.json"
+    },
+    {
+      "slide": 2,
+      "input_text_tokens": 944,
+      "input_image_tokens": 1634,
+      "output_tokens": 1510,
+      "cost_usd": 0.063092,
+      "log": "storage/generation-logs/image/openai-2026-10-02T14-12-55-664Z-80ee3916-2c23-4bab-8ff6-05713bfcbb87.json"
+    },
+    {
+      "slide": 3,
+      "input_text_tokens": 944,
+      "input_image_tokens": 1634,
+      "output_tokens": 1510,
+      "cost_usd": 0.063092,
+      "log": "storage/generation-logs/image/openai-2026-10-02T14-12-56-547Z-f2f7b575-eeae-4d8e-95fb-43c129b0e6ad.json"
+    },
+    {
+      "slide": 4,
+      "input_text_tokens": 940,
+      "input_image_tokens": 1634,
+      "output_tokens": 1510,
+      "cost_usd": 0.063072,
+      "log": "storage/generation-logs/image/openai-2026-10-02T14-12-56-561Z-634f57e9-f3fe-4c05-bec7-bae4f4206e7f.json"
+    },
+    {
+      "slide": 5,
+      "input_text_tokens": 1018,
+      "input_image_tokens": 1634,
+      "output_tokens": 1510,
+      "cost_usd": 0.063462,
+      "log": "storage/generation-logs/image/openai-2026-10-02T14-12-56-910Z-af14c5a9-c0aa-4d30-9b12-2a5735c40f93.json"
+    }
+  ],
+  "total_usd": 0.31583,
+  "approx_inr": 30.411270700000003,
+  "exchange_rate": 96.29,
+  "pricing_source": "https://developers.openai.com/api/docs/pricing"
+}
