@@ -207,7 +207,7 @@ export async function apiRoute(request, env, viewer, url) {
     if (!row) return bad('Asset not found.', 404);
     const object = await env.ASSETS.get(row.object_key);
     if (!object) return bad('Asset not found.', 404);
-    return new Response(object.body, { headers: { 'Content-Type': row.mime, 'Cache-Control': 'private, max-age=120', 'X-Content-Type-Options': 'nosniff' } });
+    return new Response(object.body, { headers: { 'Content-Type': row.mime, 'Cache-Control': 'private, max-age=31536000, immutable', 'X-Content-Type-Options': 'nosniff' } });
   }
   if (parts[3] === 'assets' && parts.length === 4 && method === 'POST') {
     const input = await body(), image = decodeImage(input.image);
