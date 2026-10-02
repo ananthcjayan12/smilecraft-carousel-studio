@@ -151,12 +151,12 @@ async function generateImage(env, job, project, clientId, request) {
   let image;
   if (job.provider === 'openai') {
     const form = new FormData();
-    form.append('model', job.model_id); form.append('prompt', prompt); form.append('size', openaiImageSize(job.model_id, project.generation?.aspectRatio)); form.append('quality', 'medium'); form.append('output_format', 'png');
+    form.append('model', job.model_id); form.append('prompt', prompt); form.append('size', openaiImageSize(job.model_id, project.generation?.aspectRatio)); form.append('quality', 'medium'); form.append('output_format', 'webp'); form.append('output_compression', '80');
     form.append('image[]', new Blob([referenceBytes], { type: referenceMime }), 'reference');
     const logoId = context.brand?.logoAssetId;
     if (logoId) { const logo = await assetBytes(env, job.account_id, clientId, logoId); if (logo) form.append('image[]', new Blob([logo.bytes], { type: logo.mime }), 'logo'); }
     const data = await request('https://api.openai.com/v1/images/edits', { method: 'POST', headers: { Authorization: `Bearer ${env.OPENAI_API_KEY}` }, body: form });
-    image = { base64: data.data?.[0]?.b64_json, mime: 'image/png' };
+    image = { base64: data.data?.[0]?.b64_json, mime: 'image/webp' };
   } else {
     const bytes = new Uint8Array(referenceBytes);
     let base64 = ''; for (let i = 0; i < bytes.length; i += 8190) base64 += btoa(String.fromCharCode(...bytes.slice(i, i + 8190)));
@@ -165,7 +165,7 @@ async function generateImage(env, job, project, clientId, request) {
   }
   if (!image?.base64) throw error('The provider returned no artwork.', 502);
   const binary = atob(image.base64), bytes = Uint8Array.from(binary, char => char.charCodeAt(0));
-  const asset = await saveAsset(env, job.account_id, clientId, { projectId: project.id, kind: 'generated', name: `slide-${job.slide_index + 1}.png`, mime: image.mime || 'image/png', bytes });
+  const asset = await saveAsset(env, job.account_id, clientId, { projectId: project.id, kind: 'generated', name: `slide-${job.slide_index + 1}.${(image.mime || '').includes('webp') ? 'webp' : 'png'}`, mime: image.mime || 'image/png', bytes });
   const slides = [...project.slides];
   slides[job.slide_index] = { ...item, artworkAssetId: asset.id, artworkProvider: job.provider, artworkGeneratedAt: stamp(), artworkReviewed: false, artworkReviewedAt: '' };
   return { slides };
