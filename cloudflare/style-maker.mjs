@@ -33,7 +33,6 @@ export async function renderStyleBoard(env, accountId, client, input, viewer) {
   const businessType = limit(input.businessType, 100);
   if (!name || !businessType) throw fail('Add a business name and industry.');
   const logo = input.logoImage ? decodeImage(input.logoImage) : client.brand?.logoAssetId ? await assetBytes(env, accountId, client.id, client.brand.logoAssetId) : null;
-  if (!logo && !input.sourceTemplateId) throw fail('Upload a logo in the brand kit or add one here first.');
   if (input.sourceTemplateId) {
     const source = await env.DB.prepare('SELECT id FROM templates WHERE account_id=? AND client_id=? AND business_pack_id=? AND id=?').bind(accountId, client.id, client.businessPackId, input.sourceTemplateId).first();
     if (!source) throw fail('Client style not found.', 404);
@@ -69,8 +68,8 @@ export async function renderStyleBoard(env, accountId, client, input, viewer) {
     let result;
     if (provider === 'openai') {
       const form = new FormData();
-      form.append('model', model); form.append('prompt', prompt); form.append('size', '1536x1024'); form.append('quality', 'medium'); form.append('output_format', 'png');
-      form.append('image[]', new Blob([referenceBytes], { type: customReference?.mime || 'image/png' }), 'inspiration.png');
+      form.append('model', model); form.append('prompt', prompt); form.append('size', '1536x1024'); form.append('quality', 'medium'); form.append('output_format', 'webp'); form.append('output_compression', '78');
+      form.append('image[]', new Blob([referenceBytes], { type: customReference?.mime || 'image/png' }), 'inspiration');
       if (logo) form.append('image[]', new Blob([logo.bytes], { type: logo.mime }), 'logo');
       if (mood) form.append('image[]', new Blob([mood.bytes], { type: mood.mime }), 'mood');
       const response = await fetch('https://api.openai.com/v1/images/edits', { method: 'POST', headers: { Authorization: `Bearer ${env.OPENAI_API_KEY}` }, body: form });
