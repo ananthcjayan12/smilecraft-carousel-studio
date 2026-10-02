@@ -1,7 +1,7 @@
-name: Deploy v3 to Cloudflare
+name: Deploy v5 to Cloudflare
 on:
   push:
-    branches: [v3]
+    branches: [v5]
   workflow_dispatch:
 permissions:
   contents: read
@@ -10,7 +10,7 @@ concurrency:
   cancel-in-progress: false
 jobs:
   deploy:
-    if: github.ref == 'refs/heads/v3'
+    if: github.ref == 'refs/heads/v5'
     runs-on: ubuntu-latest
     environment: production
     steps:
