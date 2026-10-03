@@ -36,6 +36,6 @@ for(const [provider,model,base,effort] of [
 test('style boards stay in the clinic language and keep the supplied logo verbatim',()=>{
  assert.deepEqual(styleLanguages('Malayalam + English'),['Malayalam','English']);assert.deepEqual(styleLanguages('Hindi, English'),['Hindi','English']);assert.deepEqual(styleLanguages(''),['English']);
  const english=stylePrompt({name:'Smile Studio Ballarat',brand:{},profile:{language:'English'}},'clinical-white');
- assert.match(english,/in English only/);assert.match(english,/no Chinese/);assert.doesNotMatch(english,/bilingual/);assert.match(english,/Reproduce it exactly as supplied/);assert.doesNotMatch(english,/consistently and tastefully/);
+ assert.match(english,/in English only/);assert.match(english,/no Chinese/);assert.doesNotMatch(english,/bilingual/);assert.match(english,/Keep its exact shape/);assert.match(english,/only the upload canvas, so drop it/);assert.doesNotMatch(english,/same letterforms, monogram, symbol, proportions, colours/);assert.doesNotMatch(english,/consistently and tastefully/);
  const mixed=stylePrompt({name:'River Dental',brand:{},profile:{language:'Malayalam + English'}},'clinical-white');assert.match(mixed,/exactly these languages: Malayalam and English/);
 });
