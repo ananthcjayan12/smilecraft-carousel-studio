@@ -18,8 +18,8 @@ export default {
         const auth = await authRoute(request, env, url);
         if (auth) return auth;
       }
-      // Free-carousel requests are public: no sign-in, forwarded to the Google Sheet.
-      if (path === '/api/public/sample-request') return sampleRequestRoute(request, url, { env });
+      // Free-carousel requests are public: no sign-in, saved for the administrator's Leads page.
+      if (path === '/api/public/sample-request') return sampleRequestRoute(request, url, { db: env.DB });
       // The app shell is public; authentication belongs to its private API calls.
       if (path === '/') return env.STATIC.fetch(request);
       const authStarted=performance.now(),viewer=await session(request,env),authDuration=performance.now()-authStarted;

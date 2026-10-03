@@ -5,6 +5,7 @@ import { runJob, cancelJob } from './generation.mjs';
 import { enqueueCompanion, companionStyleResult } from './companion.mjs';
 import { templateImportRoute } from './template-import.mjs';
 import { renderStyleBoard } from './style-maker.mjs';
+import { adminLeadsRoute } from '../server/sample-request.mjs';
 
 const now = () => new Date().toISOString();
 const parse = (value, fallback = {}) => { try { return JSON.parse(value); } catch { return fallback; } };
@@ -68,6 +69,10 @@ export async function apiRoute(request, env, viewer, url) {
     if (!env.ADMIN_EMAIL || viewer.email.toLowerCase() !== env.ADMIN_EMAIL.toLowerCase()) return bad('Not authorized.', 403);
     const accounts = await all(env.DB, `SELECT a.id,a.name,u.email,s.plan_id AS planId,a.companion_enabled AS companionEnabled,COALESCE((SELECT SUM(l.amount) FROM credit_ledger l WHERE l.account_id=a.id AND (l.expires_at IS NULL OR l.expires_at>datetime('now'))),0)-COALESCE((SELECT SUM(r.amount) FROM credit_reservations r WHERE r.account_id=a.id AND r.status='reserved'),0) AS credits FROM accounts a JOIN memberships m ON m.account_id=a.id AND m.role='owner' JOIN users u ON u.id=m.user_id LEFT JOIN subscriptions s ON s.account_id=a.id ORDER BY a.created_at DESC LIMIT 500`);
     return json({ accounts });
+  }
+  if (parts[0] === 'api' && parts[1] === 'admin' && parts[2] === 'leads') {
+    if (!env.ADMIN_EMAIL || viewer.email.toLowerCase() !== env.ADMIN_EMAIL.toLowerCase()) return bad('Not authorized.', 403);
+    return adminLeadsRoute(request, url, env.DB);
   }
   if (parts[0] === 'api' && parts[1] === 'admin' && parts[2] === 'accounts' && parts[3] && parts[4] === 'allocate' && method === 'POST') {
     if (!env.ADMIN_EMAIL || viewer.email.toLowerCase() !== env.ADMIN_EMAIL.toLowerCase()) return bad('Not authorized.', 403);

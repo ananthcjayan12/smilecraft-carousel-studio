@@ -38,16 +38,8 @@ References checked 3 October 2026:
 
 ## Free carousel requests
 
-`/free-carousel/` asks for four things: name, clinic name, email and the clinic's Instagram handle. Submissions go to `POST /api/public/sample-request` (Worker or local server), which validates them, neutralises spreadsheet formulas and appends a row to the Google Sheet through an Apps Script web app. Visitors never see the sheet URL or its secret. A hidden honeypot field drops simple bots.
+`/free-carousel/` asks for four things: name, clinic name, email and the clinic's Instagram handle. Submissions go to `POST /api/public/sample-request` (Worker or local server), which validates them and saves them to the `sample_requests` table (D1 in the cloud, SQLite locally). A repeat of the same email and Instagram handle keeps the original lead. A hidden honeypot field drops simple bots.
 
-One-time sheet setup:
-
-1. Open the sheet → Extensions → Apps Script. Paste `scripts/google-sheets/sample-requests.gs` and save.
-2. Project Settings → Script properties → add `SECRET` with a long random value (for example `openssl rand -hex 32`).
-3. Select `setup` and Run. Approve the Google permission prompt. This names the tab "Sample requests", adds the headers (Submitted at, Name, Clinic name, Email, Instagram, UTM source/medium/campaign/content, Status, Notes), freezes the header row and adds a Status dropdown.
-4. Deploy → New deployment → Web app. Execute as: Me. Who has access: Anyone. Copy the `/exec` URL.
-5. Give the site both values: `wrangler secret put SHEETS_WEBHOOK_URL` and `wrangler secret put SHEETS_WEBHOOK_SECRET` for Cloudflare, or `SHEETS_WEBHOOK_URL=` and `SHEETS_WEBHOOK_SECRET=` in `.env` for the local server.
-
-Until both values are set, the form shows "Requests are not being accepted online yet. Please email hello@srshti.co.in." After changing the Apps Script code, deploy a new version of the same deployment so the URL stays the same.
+The administrator (the `ADMIN_EMAIL` account) reviews them in the studio under **Leads** (`#/leads`, also linked from the admin dashboard): filter by status, update each lead's status (New, Contacted, Sample sent, Demo booked, Customer, Not a fit), keep notes, and download everything as a CSV. No extra secrets or setup are needed; the table is created by migration `0014_sample_requests.sql`, which the deploy workflow applies.
 
 Confirm authorisation, brand details and delivery timing by email before preparing one five-slide carousel and caption. One sample per practice, no purchase obligation. Do not request Instagram credentials or patient information. Track the first 100 paid clinic activations manually and confirm founding eligibility before payment. The $80 monthly rate continues with uninterrupted monthly renewal; later pricing is not advertised yet.
