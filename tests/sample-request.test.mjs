@@ -23,8 +23,10 @@ test('leads are cleaned and keep their campaign source',()=>{
 
 test('valid requests are saved once, and repeats keep the original lead',async()=>{
   const db=d1();
-  assert.equal((await call(db,valid)).status,201);
-  assert.equal((await call(db,{...valid,name:'Jane again'})).status,201);
+  const first=await call(db,valid),repeat=await call(db,{...valid,name:'Jane again'});
+  assert.equal(first.status,201);assert.equal(repeat.status,201);
+  const firstId=(await first.json()).id;
+  assert.ok(firstId);assert.equal((await repeat.json()).id,firstId);
   const rows=db.raw.prepare('SELECT * FROM sample_requests').all();
   assert.equal(rows.length,1);
   assert.equal(rows[0].name,'Dr Jane Lee');assert.equal(rows[0].email,'jane@riverdental.com');assert.equal(rows[0].utm_source,'chatgpt');assert.equal(rows[0].status,'New');

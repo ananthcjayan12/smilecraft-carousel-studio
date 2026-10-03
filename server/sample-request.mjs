@@ -37,7 +37,9 @@ export async function sampleRequestRoute(request, url, { db, now } = {}) {
     await db.prepare(`INSERT INTO sample_requests(id,created_at,updated_at,name,clinic,email,instagram,utm_source,utm_medium,utm_campaign,utm_content)
       SELECT ?,?,?,?,?,?,?,?,?,?,? WHERE NOT EXISTS (SELECT 1 FROM sample_requests WHERE email=? AND instagram=?)`)
       .bind(crypto.randomUUID(), lead.createdAt, lead.createdAt, lead.name, lead.clinic, lead.email, lead.instagram, ...UTM.map(k => lead[k]), lead.email, lead.instagram).run();
-    return reply({ ok: true }, 201);
+    // The stored id doubles as the ad-measurement event id, so a repeat request is never counted as a second lead.
+    const saved = await db.prepare('SELECT id FROM sample_requests WHERE email=? AND instagram=?').bind(lead.email, lead.instagram).first();
+    return reply({ ok: true, id: saved?.id }, 201);
   } catch (error) {
     if (!error.status) console.error('Sample request failed', error);
     return reply({ error: error.status ? error.message : 'We could not save your request. Please try again or email hello@srshti.co.in.' }, error.status || 500);

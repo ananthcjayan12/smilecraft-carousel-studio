@@ -6,6 +6,7 @@ document.querySelector('#clear-preferences')?.addEventListener('click',()=>{try{
 
 import {marketingConfig} from './marketing-config.js';
 import {validatedCalendarUrl,confirmedBooking} from './demo-tracking.js';
+import {sampleForm,sampleUrl} from './sample-offer.js';
 const consentKey='srshti-ad-measurement';
 let measurementAllowed=false, pixelReady=false;
 function savedChoice(){try{return localStorage.getItem(consentKey)}catch{return null}}
@@ -18,6 +19,8 @@ function loadPixel(){
  const script=document.createElement('script');script.async=true;script.src='https://bzrcdn.openai.com/sdk/oaiq.min.js';document.head.append(script);
  window.oaiq('measure','page_viewed',{type:'contents'});
 }
+// Conversions go to the pixel only with consent. event_id lets OpenAI drop duplicates of the same booking or request.
+function measure(name,eventId){if(!measurementAllowed||!marketingConfig.pixelId)return;loadPixel();window.oaiq('measure',name,{type:'customer_action'},{event_id:eventId})}
 function chooseMeasurement(choice){
  measurementAllowed=choice==='allow';
  try{localStorage.setItem(consentKey,choice)}catch{}
@@ -31,29 +34,76 @@ export function mountMeasurement(){
  if(measurementAllowed)loadPixel();
  if(choice||document.querySelector('#measurement-banner'))return;
  const banner=document.createElement('aside');banner.id='measurement-banner';banner.className='m-measurement';banner.setAttribute('aria-label','Optional advertising measurement');
- banner.innerHTML='<b>Your choice about advertising measurement</b><p>Allow the OpenAI Ads pixel to measure visits and confirmed demo bookings, or reject it. You can request a demo either way. <a href="/cookies/">Cookie details</a></p><div class="m-actions"><button type="button" class="btn primary" data-measurement="allow">Allow measurement</button><button type="button" class="btn" data-measurement="reject">Reject measurement</button></div>';
+ banner.innerHTML='<b>Your choice about advertising measurement</b><p>Allow the OpenAI Ads pixel to measure visits, free sample requests and confirmed demo bookings, or reject it. You can request a sample or a demo either way. <a href="/cookies/">Cookie details</a></p><div class="m-actions"><button type="button" class="btn primary" data-measurement="allow">Allow measurement</button><button type="button" class="btn" data-measurement="reject">Reject measurement</button></div>';
  document.body.append(banner);
 }
 document.addEventListener('click',event=>{const button=event.target.closest('[data-measurement]');if(button)chooseMeasurement(button.dataset.measurement)});
 window.addEventListener('storage',event=>{if(event.key===consentKey){measurementAllowed=event.newValue==='allow';if(measurementAllowed)loadPixel();else window.oaiq?.('consent',false)}});
 mountMeasurement();
-const sampleForm=document.querySelector('#sample-request-form');
-if(sampleForm)sampleForm.addEventListener('submit',async event=>{
+// Free sample carousel: the same form runs inline on /free-carousel/ and in a pop-up opened by any [data-sample-open] link.
+const sampleFields=['name','clinic','email','instagram'],sentKey='srshti-sample-sent',utmKey='srshti-utm';
+const utmKeys=['utm_source','utm_medium','utm_campaign','utm_content'];
+// Keep the ad's campaign tags for the visit, so a request made after browsing other pages is still attributed.
+const pageUtm=Object.fromEntries(utmKeys.map(k=>[k,new URLSearchParams(location.search).get(k)||'']));
+if(Object.values(pageUtm).some(Boolean))try{sessionStorage.setItem(utmKey,JSON.stringify(pageUtm))}catch{}
+function campaignTags(){if(Object.values(pageUtm).some(Boolean))return pageUtm;try{return {...pageUtm,...JSON.parse(sessionStorage.getItem(utmKey)||'{}')}}catch{return pageUtm}}
+function sampleError(form,name){
+ const value=form.elements[name].value.trim();
+ if(name==='instagram')return !value?'Your clinic’s Instagram is required so we can match your branding.':/^(@?[A-Za-z0-9._]{1,30}|(https?:\/\/)?(www\.)?instagram\.com\/[A-Za-z0-9._]{1,30}\/?(\?.*)?)$/i.test(value)?'':'Enter a valid Instagram handle, for example @yourclinic.';
+ if(!value)return {name:'Please enter your name.',clinic:'Please enter your clinic name.',email:'Please enter your email.'}[name];
+ return name==='email'&&!/^[^\s@<>]+@[^\s@<>]+\.[^\s@<>]{2,}$/.test(value)?'Enter a valid email, for example you@yourclinic.com.':'';
+}
+function showSampleError(form,name,message){const input=form.elements[name],box=form.querySelector(`#${input.id}-error`);input.setAttribute('aria-invalid',String(Boolean(message)));box.textContent=message;box.hidden=!message}
+const sampleTarget=event=>{const form=event.target.form;return form?.matches('[data-sample-form]')&&sampleFields.includes(event.target.name)?form:null};
+// Check a field when the visitor leaves it (not while they tab past an empty one), and clear its error as soon as it is fixed.
+document.addEventListener('focusout',event=>{const form=sampleTarget(event);if(form&&event.target.value.trim())showSampleError(form,event.target.name,sampleError(form,event.target.name))});
+document.addEventListener('input',event=>{const form=sampleTarget(event);if(form&&event.target.getAttribute('aria-invalid')==='true')showSampleError(form,event.target.name,sampleError(form,event.target.name))});
+document.addEventListener('submit',async event=>{
+ const form=event.target;if(!form.matches?.('[data-sample-form]'))return;
  event.preventDefault();
- const status=document.querySelector('#sample-request-status'),button=sampleForm.querySelector('button[type=submit]'),field=sampleForm.elements;
- const instagram=field.instagram.value.trim();
- field.instagram.setCustomValidity(/^(@?[A-Za-z0-9._]{1,30}|(https?:\/\/)?(www\.)?instagram\.com\/[A-Za-z0-9._]{1,30}\/?.*)$/i.test(instagram)?'':'Enter your clinic’s Instagram handle, for example @yourclinic.');
- if(!sampleForm.reportValidity())return;
- const utm=Object.fromEntries(['utm_source','utm_medium','utm_campaign','utm_content'].map(k=>[k,new URLSearchParams(location.search).get(k)||'']));
+ const errors=sampleFields.map(name=>[name,sampleError(form,name)]);errors.forEach(([name,message])=>showSampleError(form,name,message));
+ const invalid=errors.find(([,message])=>message);if(invalid)return form.elements[invalid[0]].focus();
+ const status=form.querySelector('[data-sample-status]'),button=form.querySelector('button[type=submit]'),label=button.textContent,field=form.elements;
  button.disabled=true;button.textContent='Sending…';status.textContent='';status.classList.remove('error');
  try{
-  const response=await fetch('/api/public/sample-request',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name:field.name.value,clinic:field.clinic.value,email:field.email.value,instagram,company:field.company.value,utm})});
+  const response=await fetch('/api/public/sample-request',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name:field.name.value,clinic:field.clinic.value,email:field.email.value,instagram:field.instagram.value.trim(),company:field.company.value,utm:campaignTags()})});
   const result=await response.json().catch(()=>({}));
   if(!response.ok)throw Error(result.error||'We could not save your request. Please try again.');
-  sampleForm.hidden=true;const done=document.querySelector('#sample-request-done');done.hidden=false;done.focus?.();
- }catch(error){status.textContent=error.message;status.classList.add('error');button.disabled=false;button.textContent='Request my free carousel'}
+  if(response.status===201&&result.id)measure('lead_created',result.id); // the honeypot reply is 200 without an id
+  try{localStorage.setItem(sentKey,'1')}catch{}
+  document.querySelector('.m-sample-fab')?.remove();
+  form.hidden=true;const done=form.parentElement.querySelector('[data-sample-done]');done.hidden=false;done.focus();
+ }catch(error){status.textContent=error.message;status.classList.add('error');button.disabled=false;button.textContent=label}
 });
-sampleForm?.addEventListener('input',()=>sampleForm.elements.instagram.setCustomValidity(''));
+let sampleDialog;
+function sampleModal(){
+ if(sampleDialog)return sampleDialog;
+ sampleDialog=document.createElement('dialog');sampleDialog.className='m-sample-modal';sampleDialog.setAttribute('aria-labelledby','sm-title');
+ const art=['carousel-01','carousel-03','carousel-05'].map(f=>`<img src="/assets/demo/harbour-gum/${f}.webp" alt="" width="1080" height="1350" decoding="async">`).join('');
+ sampleDialog.innerHTML=`<div class="m-sm-in"><button type="button" class="m-sm-close" aria-label="Close">✕</button><aside class="m-sm-visual"><span class="m-sm-pill">FREE · NO OBLIGATION</span><h2>Your clinic, <em>in a carousel.</em></h2><div class="m-sm-fan" aria-hidden="true">${art}</div><ul><li>Five slides and a caption in your branding</li><li>Emailed to you within 12 hours</li><li>No passwords, card or patient data</li></ul><small>Example shown: Harbour Gum Dental, a fictional clinic.</small></aside><div class="m-sm-body">${sampleForm('sm')}</div></div>`;
+ document.body.append(sampleDialog);
+ sampleDialog.querySelector('.m-sm-close').addEventListener('click',()=>sampleDialog.close());
+ sampleDialog.addEventListener('click',event=>{if(event.target===sampleDialog)sampleDialog.close()});
+ return sampleDialog;
+}
+document.addEventListener('click',event=>{
+ const link=event.target.closest('[data-sample-open]');
+ if(!link||event.button||event.metaKey||event.ctrlKey||event.shiftKey||event.altKey)return;
+ const inline=document.querySelector('main [data-sample-form]');
+ if(inline){event.preventDefault();inline.closest('.m-card').scrollIntoView({behavior:matchMedia('(prefers-reduced-motion: reduce)').matches?'auto':'smooth',block:'center'});if(!inline.hidden)inline.elements.name.focus({preventScroll:true});return}
+ if(!window.HTMLDialogElement)return; // older browsers follow the link to /free-carousel/
+ event.preventDefault();
+ const dialog=sampleModal();dialog.showModal();
+ dialog.querySelector('[data-sample-form]:not([hidden]) input')?.focus();
+});
+// A floating reminder once the hero's buttons have scrolled away. Not on the booking page, where it would cover the calendar.
+let alreadySent=false;try{alreadySent=localStorage.getItem(sentKey)==='1'}catch{}
+if(!alreadySent&&!['/free-carousel/','/dental-demo/'].includes(location.pathname)){
+ const fab=document.createElement('a');fab.className='m-sample-fab';fab.href=sampleUrl;fab.dataset.sampleOpen='';
+ fab.innerHTML='<img src="/assets/demo/harbour-gum/carousel-01.webp" alt="" width="1080" height="1350" decoding="async"><span><b>Get a free sample carousel</b><small>5 slides in your clinic’s branding</small></span><i aria-hidden="true">→</i>';
+ document.body.append(fab);
+ const toggle=()=>fab.classList.toggle('show',scrollY>560);addEventListener('scroll',toggle,{passive:true});toggle();
+}
 const calendarUrl=validatedCalendarUrl(marketingConfig.bookingUrl);
 if(calendarUrl&&document.querySelector('#calendar-booking')){
  document.querySelector('#calendar-booking').hidden=false;
@@ -66,7 +116,7 @@ if(calendarUrl&&document.querySelector('#calendar-booking')){
  window.addEventListener('message',event=>{
   const uri=confirmedBooking(event,frame.contentWindow);if(!uri||seen.has(uri))return;seen.add(uri);
   document.querySelector('#booking-status').textContent='Your demo is booked. Check your email for the confirmation and joining details.';
-  if(measurementAllowed&&marketingConfig.pixelId){loadPixel();window.oaiq('measure','appointment_scheduled',{type:'customer_action'},{event_id:uri});}
+  measure('appointment_scheduled',uri);
  });
 }
 const track=document.querySelector('.m-sp-track');
