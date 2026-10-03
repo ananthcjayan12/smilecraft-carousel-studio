@@ -11,7 +11,10 @@ Single source: `web/v4/marketing.js`. USD monthly prices: Starter $29 / 100 usag
 ## Implemented
 
 - Responsive landing page in the existing lavender/DM Sans/Manrope design system.
-- Illustrative animated workflow with pause and selectable steps, reduced-motion support, and explanatory feature graphics.
+- Hero "app film": a five-chapter animated walkthrough (Brand → Plan → Write → Design → Approve) of an example clinic, mirroring real studio labels and behaviour, with an animated cursor, pause/play, clickable chapters, a compact layout for phones and static end-states for reduced motion. The Write chapter shows the real `checkDraft` rejection message for an outcome claim.
+- Showcase of a CSS-rendered five-slide carousel (Hook → Science → Impact → Action → CTA) and a story, with live style switching. Slides are illustrative, not generated output, and use a fictional example clinic.
+- Savings calculator (`estimate()` in `marketing.js`): designer hours × editable rate vs the smallest plan covering the mix. Assumptions: 3 h per carousel, 1 h per post, 45 min per story; 52/12/12 credits plus a 20% revision allowance. All assumptions are shown on the page and labelled as an estimate, not a quote. Revisit if credit costs change.
+- Compliance-aware section describing only enforced guardrails (approved-source span check, blocked outcome terms, unsupported numbers, image-prompt rules, CTA only on final slide, no patient data), plus a filterable wall of 12 standards across AU/IE/US. Seals are original typographic marks, **not official logos**: regulator and professional-body logos (Ahpra, FTC, ADA, Dental Council, etc.) generally cannot be used commercially and would imply endorsement, which conflicts with the ad-policy requirement against misleading affiliation. A non-affiliation disclaimer sits under the wall.
 - USD pricing, allowances, taxes/conversion disclosures and realistic launch limitations.
 - Pricing, about, contact/support, privacy, terms, payments/refunds, cookies, acceptable use and dental marketing guide pages.
 - Contact form opens an email draft; it does not claim an email was sent.
