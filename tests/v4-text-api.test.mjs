@@ -2,7 +2,7 @@ import {test} from 'node:test';
 import assert from 'node:assert/strict';
 import {apiStructured,assertSchema} from '../server/v4/text-api.mjs';
 import {writingSchema,briefSchema,writingPrompt,artworkPrompt,sourceBrief,contentContext} from '../server/v4/content-prompts.mjs';
-import {stylePrompt} from '../server/v4/image-prompts.mjs';
+import {stylePrompt,styleLanguages} from '../server/v4/image-prompts.mjs';
 for(const provider of ['openai','gemini','claude'])test(`${provider} writing sends the reference image and structured schema`,async()=>{
  const schema=writingSchema('post'),draft={topic:'Topic',brief:'Brief',frames:[{heading:'Heading',body:'Body',visualPrompt:'Concept'}],caption:'Caption'};let request;
  const fetcher=async(url,options)=>{request={url,body:JSON.parse(options.body)};return Response.json(provider==='openai'?{choices:[{message:{content:JSON.stringify(draft)}}]}:provider==='gemini'?{candidates:[{content:{parts:[{text:JSON.stringify(draft)}]}}]}:{content:[{text:JSON.stringify(draft)}]});};
@@ -31,4 +31,11 @@ for(const [provider,model,base,effort] of [
  await apiStructured({provider,model,prompt:'Test',schema,env:{OPENAI_API_KEY:'test',GEMINI_API_KEY:'test'},fetcher});
  if(provider==='gemini'){assert.ok(request.url.endsWith(`/models/${base}:generateContent`));assert.deepEqual(request.body.generationConfig.thinkingConfig,{thinkingLevel:effort});}
  else{assert.equal(request.body.model,base);assert.equal(request.body.reasoning_effort,effort);}
+});
+
+test('style boards stay in the clinic language and keep the supplied logo verbatim',()=>{
+ assert.deepEqual(styleLanguages('Malayalam + English'),['Malayalam','English']);assert.deepEqual(styleLanguages('Hindi, English'),['Hindi','English']);assert.deepEqual(styleLanguages(''),['English']);
+ const english=stylePrompt({name:'Smile Studio Ballarat',brand:{},profile:{language:'English'}},'clinical-white');
+ assert.match(english,/in English only/);assert.match(english,/no Chinese/);assert.doesNotMatch(english,/bilingual/);assert.match(english,/Reproduce it exactly as supplied/);assert.doesNotMatch(english,/consistently and tastefully/);
+ const mixed=stylePrompt({name:'River Dental',brand:{},profile:{language:'Malayalam + English'}},'clinical-white');assert.match(mixed,/exactly these languages: Malayalam and English/);
 });
