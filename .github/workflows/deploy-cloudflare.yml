@@ -31,7 +31,7 @@ jobs:
           R2_BUCKET_NAME: ${{ vars.R2_BUCKET_NAME }}
           QUEUE_NAME: ${{ vars.QUEUE_NAME }}
           DEAD_QUEUE_NAME: ${{ vars.DEAD_QUEUE_NAME }}
-          APP_ORIGIN: ${{ vars.APP_ORIGIN }}
+          APP_ORIGIN: https://studio.srshti.co.in
           ADMIN_EMAIL: ${{ vars.ADMIN_EMAIL }}
           SRSHTI_IMAGE_MODEL: ${{ vars.SRSHTI_IMAGE_MODEL }}
         run: |
