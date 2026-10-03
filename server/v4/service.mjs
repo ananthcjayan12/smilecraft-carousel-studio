@@ -204,7 +204,7 @@ export function createV4Service(platform){
     result={extracted:true};
    }else if(row.kind==='style'){
     const style=await first('SELECT * FROM v4_styles WHERE id=? AND account_id=?',input.styleId,account);if(!style)throw fail('Style not found.',404);
-    const image=await platform.generateStyle(c,input.referenceId,row.id,input.generation,controller.signal);await ensureRunning(image);const assetId=await saveAsset(account,c.id,image);await ensureRunning(image);
+    const image=await platform.generateStyle(c,input.referenceId,row.id,input.generation,controller.signal,{notes:input.notes||'',currentAssetId:input.revise?style.asset_id||'':''});await ensureRunning(image);const assetId=await saveAsset(account,c.id,image);await ensureRunning(image);
     await run("UPDATE v4_styles SET asset_id=?,status='ready' WHERE id=? AND account_id=? AND EXISTS(SELECT 1 FROM v4_jobs WHERE id=? AND status='running')",assetId,style.id,account,row.id);result={styleId:style.id};
    }else if(['brief','writing','validation'].includes(row.kind)){
     let item=await content(account,row.content_id);if(item.revision!==input.revision)throw fail('Content changed while writing.');
@@ -256,24 +256,38 @@ export function createV4Service(platform){
   }catch(error){
    if(!await stillRunning())return;
    const message=text(error.message,400);const failed=await run("UPDATE v4_jobs SET status='failed',error=?,finished_at=? WHERE id=? AND status='running'",message,now(),row.id);if(!failed.meta.changes)return;
-   if(row.kind==='style')await run("UPDATE v4_styles SET status='failed' WHERE id=? AND account_id=?",input.styleId,account);
+   // A failed regeneration keeps the previous artwork usable.
+   if(row.kind==='style')await run("UPDATE v4_styles SET status=CASE WHEN asset_id IS NULL THEN 'failed' ELSE 'ready' END WHERE id=? AND account_id=?",input.styleId,account);
    if(row.content_id)await run("UPDATE v4_content SET status='failed' WHERE id=? AND account_id=? AND revision=?",row.content_id,account,input.revision);
    if(row.content_id){const failedItem=await content(account,row.content_id);await updateWeek(account,failedItem.week_id);}
   }finally{clearInterval(poll);controllers.delete(row.id);}
  }
  async function generateStyles(account,clinicId){
   await taskChoice(account,'style');
-  const c=await clinic(account,clinicId),existing=await all('SELECT reference_id FROM v4_styles WHERE account_id=? AND clinic_id=?',account,clinicId);
+  const c=await clinic(account,clinicId),existing=await all('SELECT id,reference_id,status FROM v4_styles WHERE account_id=? AND clinic_id=?',account,clinicId);
   const ranked=[...STYLE_REFERENCES,...DESIGN_SYSTEMS.map(d=>d.id)].filter((v,i,a)=>a.indexOf(v)===i);
-  const next=ranked.filter(r=>!existing.some(s=>s.reference_id===r)).slice(0,3);
-  await Promise.all(next.map(async referenceId=>{const styleId=id();const inserted=await run('INSERT OR IGNORE INTO v4_styles(id,account_id,clinic_id,reference_id,name,created_at) VALUES(?,?,?,?,?,?)',styleId,account,clinicId,referenceId,DESIGN_SYSTEMS.find(d=>d.id===referenceId).name,now());if(!inserted.meta.changes)return;await job(account,clinicId,'style',{styleId,referenceId},{priority:0,key:`style:${clinicId}:${referenceId}`});}));
+  // Unseen references first; removed styles can come back once those run out.
+  const removed=existing.filter(s=>s.status==='deleted');
+  const next=[...ranked.filter(r=>!existing.some(s=>s.reference_id===r)),...ranked.filter(r=>removed.some(s=>s.reference_id===r))].slice(0,3);
+  await Promise.all(next.map(async referenceId=>{
+   const old=removed.find(s=>s.reference_id===referenceId);let styleId=old?.id;
+   if(old){const revived=await run("UPDATE v4_styles SET status='generating',asset_id=NULL,created_at=? WHERE id=? AND account_id=? AND status='deleted'",now(),old.id,account);if(!revived.meta.changes)return;}
+   else{styleId=id();const inserted=await run('INSERT OR IGNORE INTO v4_styles(id,account_id,clinic_id,reference_id,name,created_at) VALUES(?,?,?,?,?,?)',styleId,account,clinicId,referenceId,DESIGN_SYSTEMS.find(d=>d.id===referenceId).name,now());if(!inserted.meta.changes)return;}
+   await job(account,clinicId,'style',{styleId,referenceId},{priority:0,key:`style:${styleId}:${id()}`});}));
   return {styles:await styles(account,clinicId)};
+ }
+ async function regenerateStyle(account,c,styleId,notes){
+  await taskChoice(account,'style');
+  const style=await first("SELECT * FROM v4_styles WHERE id=? AND account_id=? AND clinic_id=? AND status!='deleted'",styleId,account,c.id);if(!style)throw fail('Style not found.',404);
+  const started=await run("UPDATE v4_styles SET status='generating' WHERE id=? AND account_id=? AND status IN ('ready','failed','cancelled')",style.id,account);if(!started.meta.changes)throw fail('This style is already being created.',409);
+  await job(account,c.id,'style',{styleId:style.id,referenceId:style.reference_id,notes,revise:Boolean(style.asset_id)},{priority:0,key:`style:${style.id}:${id()}`});
+  return {styles:await styles(account,c.id)};
  }
  async function cancelJobs(account,clinicId,weekId=null){
   if(weekId)await run("UPDATE v4_weeks SET status='cancelled' WHERE id=? AND account_id=? AND status IN ('hero-generating','generating','briefing','writing','copy-review','planned')",weekId,account);
   const scope=weekId?'week_id=?':"clinic_id=? AND kind='style'",scopeId=weekId||clinicId;
   const cancelled=(await db.prepare(`UPDATE v4_jobs SET status='cancelled',request_key=request_key||':cancelled:'||id,error='Generation cancelled.',finished_at=? WHERE account_id=? AND ${scope} AND status IN ('queued','running') RETURNING *`).bind(now(),account,scopeId).all()).results;
-  for(const j of cancelled){controllers.get(j.id)?.abort();if(j.kind==='style')await run("UPDATE v4_styles SET status='cancelled' WHERE id=? AND status='generating'",parse(j.input_json).styleId);}
+  for(const j of cancelled){controllers.get(j.id)?.abort();if(j.kind==='style')await run("UPDATE v4_styles SET status=CASE WHEN asset_id IS NULL THEN 'cancelled' ELSE 'ready' END WHERE id=? AND status='generating'",parse(j.input_json).styleId);}
   if(weekId){await run("UPDATE v4_weeks SET status='cancelled' WHERE id=? AND account_id=? AND status IN ('hero-generating','generating','briefing','writing','copy-review','planned')",weekId,account);await run("UPDATE v4_content SET status='cancelled' WHERE week_id=? AND account_id=? AND status IN ('generating','writing','briefing','validating')",weekId,account);}
   return {ok:true,cancelled:cancelled.length};
  }
@@ -337,6 +351,7 @@ export function createV4Service(platform){
     const logoAssetId=await saveAsset(account,c.id,{bytes,mime});await run('UPDATE v4_clinics SET brand_json=?,revision=revision+1,updated_at=? WHERE account_id=? AND id=?',JSON.stringify({...c.brand,logoAssetId,...Object.fromEntries(['primary','accent'].map(k=>[k,request.headers.get('X-Logo-'+k)]).filter(([,v])=>/^#[0-9a-f]{6}$/i.test(v||'')))}),now(),account,c.id);return json({clinic:await clinic(account,c.id)});
    }
    if(parts[2]==='styles'&&parts[3]==='cancel'&&method==='POST')return json(await cancelJobs(account,c.id));
+   if(parts[2]==='styles'&&parts[3]&&parts[4]==='regenerate'&&method==='POST'){await platform.requireActivation(account);const input=await body();return json(await regenerateStyle(account,c,parts[3],text(input.notes,400)));}
    if(parts[2]==='styles'&&method==='POST'){await platform.requireActivation(account);return json(await generateStyles(account,c.id));}
    if(parts[2]==='styles'&&parts[3]&&method==='DELETE'){
     const selected=[c.styleSelection.primaryStyleId,...(c.styleSelection.secondaryStyleIds||[])];if(selected.includes(parts[3]))throw fail('Choose another primary or supporting style before removing this one.');
