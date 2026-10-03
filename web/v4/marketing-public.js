@@ -37,27 +37,30 @@ export function mountMeasurement(){
 document.addEventListener('click',event=>{const button=event.target.closest('[data-measurement]');if(button)chooseMeasurement(button.dataset.measurement)});
 window.addEventListener('storage',event=>{if(event.key===consentKey){measurementAllowed=event.newValue==='allow';if(measurementAllowed)loadPixel();else window.oaiq?.('consent',false)}});
 mountMeasurement();
-const demoForm=document.querySelector('#demo-request-form');
-if(demoForm)demoForm.addEventListener('submit',event=>{
+const sampleForm=document.querySelector('#sample-request-form');
+if(sampleForm)sampleForm.addEventListener('submit',async event=>{
  event.preventDefault();
- const sample=demoForm.dataset.request==='sample';
- const instagram=demoForm.elements.instagram,website=demoForm.elements.website;
- if(sample){instagram.setCustomValidity(instagram.value.trim()||website.value.trim()?'':'Please provide your clinic’s Instagram or website.');}
- if(!demoForm.reportValidity())return;
- const data=new FormData(demoForm),utm=new URLSearchParams(location.search);
- const source=['utm_source','utm_medium','utm_campaign','utm_content'].filter(key=>utm.has(key)).map(key=>`${key}: ${utm.get(key).slice(0,200)}`).join('\n');
- const body=`${sample?'Free branded carousel request':'Dental content demo request'}\n\nName: ${data.get('name')}\nReply email: ${data.get('email')}\nPractice: ${data.get('practice')}\nInstagram: ${data.get('instagram')||''}\nWebsite: ${data.get('website')||''}\nCountry: ${data.get('country')}\nRole: ${data.get('role')||''}\nPreferred times: ${data.get('times')||''}\n\nI requested contact about this ${sample?'free sample and am authorised to share this clinic’s branding':'demo'} and read the privacy notice.\n\n${source}`;
- const link=document.querySelector('#demo-email-link');link.href=`mailto:${supportEmail}?subject=${encodeURIComponent(sample?'Srshti free branded carousel request':'Srshti dental content demo request')}&body=${encodeURIComponent(body)}`;link.hidden=false;
- document.querySelector('#demo-request-status').textContent=sample?'Your sample request draft is ready. Open it below and send it; we will confirm acceptance and delivery timing by email.':'Your email draft is ready. Open it below and send it to request a time. A meeting has not been booked yet.';
+ const status=document.querySelector('#sample-request-status'),button=sampleForm.querySelector('button[type=submit]'),field=sampleForm.elements;
+ const instagram=field.instagram.value.trim();
+ field.instagram.setCustomValidity(/^(@?[A-Za-z0-9._]{1,30}|(https?:\/\/)?(www\.)?instagram\.com\/[A-Za-z0-9._]{1,30}\/?.*)$/i.test(instagram)?'':'Enter your clinic’s Instagram handle, for example @yourclinic.');
+ if(!sampleForm.reportValidity())return;
+ const utm=Object.fromEntries(['utm_source','utm_medium','utm_campaign','utm_content'].map(k=>[k,new URLSearchParams(location.search).get(k)||'']));
+ button.disabled=true;button.textContent='Sending…';status.textContent='';status.classList.remove('error');
+ try{
+  const response=await fetch('/api/public/sample-request',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name:field.name.value,clinic:field.clinic.value,email:field.email.value,instagram,company:field.company.value,utm})});
+  const result=await response.json().catch(()=>({}));
+  if(!response.ok)throw Error(result.error||'We could not save your request. Please try again.');
+  sampleForm.hidden=true;const done=document.querySelector('#sample-request-done');done.hidden=false;done.focus?.();
+ }catch(error){status.textContent=error.message;status.classList.add('error');button.disabled=false;button.textContent='Request my free carousel'}
 });
-demoForm?.addEventListener('input',()=>demoForm.elements.instagram?.setCustomValidity(''));
+sampleForm?.addEventListener('input',()=>sampleForm.elements.instagram.setCustomValidity(''));
 const calendarUrl=validatedCalendarUrl(marketingConfig.bookingUrl);
 if(calendarUrl&&document.querySelector('#calendar-booking')){
  document.querySelector('#calendar-booking').hidden=false;
  document.querySelector('#calendar-fallback')?.remove();
  const utm=new URLSearchParams(location.search);for(const key of ['utm_source','utm_medium','utm_campaign','utm_content'])if(utm.has(key))calendarUrl.searchParams.set(key,utm.get(key).slice(0,200));
  document.querySelector('#calendar-link').href=calendarUrl.href;
- const embedded=new URL(calendarUrl);embedded.searchParams.set('embed_domain',location.hostname);embedded.searchParams.set('embed_type','Inline');
+ const embedded=new URL(calendarUrl);embedded.searchParams.set('embed_domain',location.hostname);embedded.searchParams.set('embed_type','Inline');embedded.searchParams.set('hide_gdpr_banner','1');
  const frame=document.createElement('iframe');frame.src=embedded.href;frame.title='Book a 15-minute Srshti dental content demo';frame.referrerPolicy='strict-origin-when-cross-origin';document.querySelector('#calendar-embed').append(frame);
  const seen=new Set();
  window.addEventListener('message',event=>{
@@ -65,4 +68,23 @@ if(calendarUrl&&document.querySelector('#calendar-booking')){
   document.querySelector('#booking-status').textContent='Your demo is booked. Check your email for the confirmation and joining details.';
   if(measurementAllowed&&marketingConfig.pixelId){loadPixel();window.oaiq('measure','appointment_scheduled',{type:'customer_action'},{event_id:uri});}
  });
+}
+const track=document.querySelector('.m-sp-track');
+if(track){
+ const beats=[...document.querySelectorAll('[data-slide]')],dots=[...document.querySelectorAll('.m-sp-dots i')];
+ const show=i=>{beats.forEach((b,j)=>b.setAttribute('aria-pressed',String(i===j)));dots.forEach((d,j)=>d.classList.toggle('on',i===j))};
+ beats.forEach(b=>b.addEventListener('click',()=>track.scrollTo({left:track.clientWidth*Number(b.dataset.slide),behavior:'smooth'})));
+ track.addEventListener('scroll',()=>show(Math.round(track.scrollLeft/track.clientWidth)),{passive:true});
+}
+const lightboxLinks=[...document.querySelectorAll('[data-lightbox]')];
+if(lightboxLinks.length&&window.HTMLDialogElement){
+ const box=document.createElement('dialog');box.className='m-lightbox';box.setAttribute('aria-label','Image viewer');
+ box.innerHTML='<img alt=""><button type="button" class="m-lb-prev" aria-label="Previous image">‹</button><button type="button" class="m-lb-next" aria-label="Next image">›</button><button type="button" class="m-lb-close" aria-label="Close">✕</button>';
+ document.body.append(box);
+ const img=box.querySelector('img');let group=[],at=0;
+ const open=i=>{at=(i+group.length)%group.length;const link=group[at];img.src=link.href;img.alt=link.querySelector('img')?.alt||'';box.querySelectorAll('.m-lb-prev,.m-lb-next').forEach(b=>b.hidden=group.length<2)};
+ lightboxLinks.forEach(link=>link.addEventListener('click',event=>{event.preventDefault();group=lightboxLinks.filter(l=>l.dataset.lightbox===link.dataset.lightbox);open(group.indexOf(link));box.showModal()}));
+ box.querySelector('.m-lb-prev').addEventListener('click',()=>open(at-1));box.querySelector('.m-lb-next').addEventListener('click',()=>open(at+1));box.querySelector('.m-lb-close').addEventListener('click',()=>box.close());
+ box.addEventListener('click',event=>{if(event.target===box)box.close()});
+ box.addEventListener('keydown',event=>{if(event.key==='ArrowLeft')open(at-1);if(event.key==='ArrowRight')open(at+1)});
 }

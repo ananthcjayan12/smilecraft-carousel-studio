@@ -35,6 +35,6 @@ Before running ads, confirm advertiser eligibility and geographic availability i
 
 ## Business details to verify before public launch
 
-Contact uses the project owner's existing email (`ananth.c.jayan@gmail.com`) and name (Ananth C. Jayan) from the project context. Confirm the intended public support channel and legal trading entity/address; do not invent a registered company or regional office. The privacy notice reflects the existing infrastructure but does not establish GDPR transfer safeguards, a DPA, HIPAA/BAA support, or regulator certification. Verify actual retention, transfer arrangements, tax treatment, refund operations and any mandatory jurisdictional disclosures before accepting customers who require them.
+Contact uses the public support address (`hello@srshti.co.in`) and name (Ananth C. Jayan) from the project context. Confirm the intended public support channel and legal trading entity/address; do not invent a registered company or regional office. The privacy notice reflects the existing infrastructure but does not establish GDPR transfer safeguards, a DPA, HIPAA/BAA support, or regulator certification. Verify actual retention, transfer arrangements, tax treatment, refund operations and any mandatory jurisdictional disclosures before accepting customers who require them.
 
 No assertion is made that the website or all generated content is legally compliant. The implemented wording describes the review features actually available, with the clinic retaining publication responsibility.
