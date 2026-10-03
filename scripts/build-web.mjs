@@ -1,3 +1,4 @@
+import './build-marketing.mjs';
 import {build} from 'esbuild';
 
 // A single module avoids a network waterfall through page imports on slow connections.

@@ -12,3 +12,5 @@
 @media(max-width:600px){.reference-thumbs{grid-template-columns:repeat(2,minmax(0,1fr))}.plan-footer{flex-direction:column;align-items:stretch}.generation-note{flex-wrap:wrap}.generation-note p{min-width:180px}.mobile-nav a{font-size:10px}}
 
 .notice-dismiss{flex:0 0 auto;width:30px;height:30px;border:0;border-radius:8px;background:transparent;color:inherit;font-size:22px;line-height:1;opacity:.7}.notice-dismiss:hover{background:#0000000b;opacity:1}
+
+.setup-account-actions,.m-account-actions{display:flex;align-items:center;gap:12px}.setup-account-actions>a{font-size:12px;color:var(--accent)}.logout-button{white-space:nowrap}.topbar .logout-button{min-height:32px;padding:7px 11px;font-size:11px}@media(max-width:650px){.topbar .logout-button{font-size:10px;padding:6px 9px}.setup-account-actions{gap:9px}.setup-account-actions>a{font-size:10px}.setup-account-actions .logout-button{font-size:10px}}

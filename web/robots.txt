@@ -1,0 +1,15 @@
+User-agent: OAI-AdsBot
+Allow: /
+Disallow: /api/
+Disallow: /legacy.html
+
+User-agent: OAI-SearchBot
+Allow: /
+Disallow: /api/
+Disallow: /legacy.html
+
+User-agent: *
+Allow: /
+Disallow: /api/
+Disallow: /legacy.html
+Sitemap: https://carousel-studio-v3.ananth-c-jayan.workers.dev/sitemap.xml
