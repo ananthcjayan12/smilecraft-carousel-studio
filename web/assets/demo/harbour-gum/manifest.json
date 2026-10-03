@@ -1,0 +1,82 @@
+{
+  "clinic": "Harbour Gum Dental",
+  "location": "Melbourne, Australia",
+  "fictional": true,
+  "language": "en-AU",
+  "generator": "Built-in image_gen",
+  "palette": [
+    "#003e46",
+    "#35eeee",
+    "#ffffff"
+  ],
+  "assets": [
+    {
+      "file": "carousel-01.webp",
+      "type": "carousel",
+      "title": "A little habit. A growing smile.",
+      "width": 1080,
+      "height": 1350
+    },
+    {
+      "file": "carousel-02.webp",
+      "type": "carousel",
+      "title": "Growing smiles. Individual advice.",
+      "width": 1080,
+      "height": 1350
+    },
+    {
+      "file": "carousel-03.webp",
+      "type": "carousel",
+      "title": "Keep it kind. Keep it calm.",
+      "width": 1080,
+      "height": 1350
+    },
+    {
+      "file": "carousel-04.webp",
+      "type": "carousel",
+      "title": "A check-up. A conversation.",
+      "width": 1080,
+      "height": 1350
+    },
+    {
+      "file": "carousel-05.webp",
+      "type": "carousel",
+      "title": "Let’s talk about little smiles.",
+      "width": 1080,
+      "height": 1350
+    },
+    {
+      "file": "post-01.webp",
+      "type": "post",
+      "title": "Hello, Harbour Gum.",
+      "width": 1080,
+      "height": 1350
+    },
+    {
+      "file": "post-02.webp",
+      "type": "post",
+      "title": "Your questions are welcome.",
+      "width": 1080,
+      "height": 1350
+    },
+    {
+      "file": "story-01.webp",
+      "type": "story",
+      "title": "Little smiles. Big questions?",
+      "width": 1080,
+      "height": 1920
+    },
+    {
+      "file": "story-02.webp",
+      "type": "story",
+      "title": "Take a look inside.",
+      "width": 1080,
+      "height": 1920
+    },
+    {
+      "file": "logo.webp",
+      "type": "logo",
+      "title": "Harbour Gum Dental"
+    }
+  ]
+}

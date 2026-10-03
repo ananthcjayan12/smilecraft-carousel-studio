@@ -1,0 +1,45 @@
+{
+  "mode": "built-in image_gen",
+  "prompts": [
+    {
+      "file": "carousel-01",
+      "prompt": "Use case: ads-marketing. Generate a single finished portrait dental social graphic for fictional Australian clinic HARBOUR GUM DENTAL, Melbourne. Match attached reference style: deep petrol teal gradient, luminous aqua rounded thin border, bold oversized white and aqua sans-serif headings, realistic photography in lower half, refined subtle wave lines. Top left consistent white tooth-outline with small eucalyptus leaf logo beside HARBOUR GUM / DENTAL. Australian English only. No real clinic details, phone, URL, testimonials, guarantees or prices. Tiny footer 'Fictional clinic • Demo artwork'. Crisp perfectly readable text. Asset: 4:5 carousel cover, 01/05 top right. Exact heading 'A little habit.\\nA growing smile.' Exact subheading 'Questions about thumb sucking?\\nStart with a gentle conversation.' Lower half warm sunlit candid photo of a young child relaxing on sofa, thumb near mouth. Reassuring editorial composition."
+    },
+    {
+      "file": "carousel-03",
+      "prompt": "Use case: ads-marketing. Generate a single finished portrait dental social graphic for fictional Australian clinic HARBOUR GUM DENTAL, Melbourne. Match attached reference style: deep petrol teal gradient, luminous aqua rounded thin border, bold oversized white and aqua sans-serif headings, realistic photography in lower half, refined subtle wave lines. Top left consistent white tooth-outline with small eucalyptus leaf logo beside HARBOUR GUM / DENTAL. Australian English only. No real clinic details, phone, URL, testimonials, guarantees or prices. Tiny footer 'Fictional clinic • Demo artwork'. Crisp perfectly readable text. Render exact text verbatim. 4:5 carousel 03/05. Headline 'Keep it kind.\\nKeep it calm.' Body 'Talk about habits without blame.\\nMake space for small steps.' Warm natural photo of Australian parent and child smiling together in sunlit home lower half."
+    },
+    {
+      "file": "carousel-04",
+      "prompt": "Use case: ads-marketing. Generate a single finished portrait dental social graphic for fictional Australian clinic HARBOUR GUM DENTAL, Melbourne. Match attached reference style: deep petrol teal gradient, luminous aqua rounded thin border, bold oversized white and aqua sans-serif headings, realistic photography in lower half, refined subtle wave lines. Top left consistent white tooth-outline with small eucalyptus leaf logo beside HARBOUR GUM / DENTAL. Australian English only. No real clinic details, phone, URL, testimonials, guarantees or prices. Tiny footer 'Fictional clinic • Demo artwork'. Crisp perfectly readable text. Render exact text verbatim. 4:5 carousel 04/05. Headline 'A check-up.\\nA conversation.' Body 'Chat with your dentist about\\nyour child’s teeth and habits.' Pristine teal dental chair and modern timber clinic lower half."
+    },
+    {
+      "file": "carousel-05",
+      "prompt": "Use case: ads-marketing. Generate a single finished portrait dental social graphic for fictional Australian clinic HARBOUR GUM DENTAL, Melbourne. Match attached reference style: deep petrol teal gradient, luminous aqua rounded thin border, bold oversized white and aqua sans-serif headings, realistic photography in lower half, refined subtle wave lines. Top left consistent white tooth-outline with small eucalyptus leaf logo beside HARBOUR GUM / DENTAL. Australian English only. No real clinic details, phone, URL, testimonials, guarantees or prices. Tiny footer 'Fictional clinic • Demo artwork'. Crisp perfectly readable text. Render exact text verbatim. 4:5 carousel 05/05. Headline 'Let’s talk about\\nlittle smiles.' Body 'Harbour Gum Dental\\nMelbourne, Australia\\nAsk our team about a check-up.' Airy dental interior timber eucalyptus daylight lower half."
+    },
+    {
+      "file": "post-01",
+      "prompt": "Use case: ads-marketing. Generate a single finished portrait dental social graphic for fictional Australian clinic HARBOUR GUM DENTAL, Melbourne. Match attached reference style: deep petrol teal gradient, luminous aqua rounded thin border, bold oversized white and aqua sans-serif headings, realistic photography in lower half, refined subtle wave lines. Top left consistent white tooth-outline with small eucalyptus leaf logo beside HARBOUR GUM / DENTAL. Australian English only. No real clinic details, phone, URL, testimonials, guarantees or prices. Tiny footer 'Fictional clinic • Demo artwork'. Crisp perfectly readable text. Render exact text verbatim. 4:5 feed post. Headline 'Hello,\\nHarbour Gum.' Body 'Thoughtful dental conversations.\\nA welcoming space in Melbourne.' Photorealistic premium dental interior, teal chair, timber cabinetry, eucalyptus lower half."
+    },
+    {
+      "file": "post-02",
+      "prompt": "Use case: ads-marketing. Generate a single finished portrait dental social graphic for fictional Australian clinic HARBOUR GUM DENTAL, Melbourne. Match attached reference style: deep petrol teal gradient, luminous aqua rounded thin border, bold oversized white and aqua sans-serif headings, realistic photography in lower half, refined subtle wave lines. Top left consistent white tooth-outline with small eucalyptus leaf logo beside HARBOUR GUM / DENTAL. Australian English only. No real clinic details, phone, URL, testimonials, guarantees or prices. Tiny footer 'Fictional clinic • Demo artwork'. Crisp perfectly readable text. Render exact text verbatim. 4:5 feed post. Headline 'Your questions\\nare welcome.' Body 'Make time for a conversation\\nat your next dental check-up.' Natural photo smiling adult in modern clinic lower half."
+    },
+    {
+      "file": "story-01",
+      "prompt": "Use case: ads-marketing. Generate a single finished portrait dental social graphic for fictional Australian clinic HARBOUR GUM DENTAL, Melbourne. Match attached reference style: deep petrol teal gradient, luminous aqua rounded thin border, bold oversized white and aqua sans-serif headings, realistic photography in lower half, refined subtle wave lines. Top left consistent white tooth-outline with small eucalyptus leaf logo beside HARBOUR GUM / DENTAL. Australian English only. No real clinic details, phone, URL, testimonials, guarantees or prices. Tiny footer 'Fictional clinic • Demo artwork'. Crisp perfectly readable text. Render exact text verbatim. 9:16 Instagram story, text within central 75% safe zone. Headline 'Little smiles.\\nBig questions?' Body 'Let’s talk about your child’s\\nnext dental visit.' Bottom pill 'Ask our team'. Warm realistic parent child reading together lower half."
+    },
+    {
+      "file": "story-02",
+      "prompt": "Use case: ads-marketing. Generate a single finished portrait dental social graphic for fictional Australian clinic HARBOUR GUM DENTAL, Melbourne. Match attached reference style: deep petrol teal gradient, luminous aqua rounded thin border, bold oversized white and aqua sans-serif headings, realistic photography in lower half, refined subtle wave lines. Top left consistent white tooth-outline with small eucalyptus leaf logo beside HARBOUR GUM / DENTAL. Australian English only. No real clinic details, phone, URL, testimonials, guarantees or prices. Tiny footer 'Fictional clinic • Demo artwork'. Crisp perfectly readable text. Render exact text verbatim. 9:16 Instagram story, text within central 75% safe zone. Headline 'Take a look\\ninside.' Body 'A welcoming space.\\nHarbour Gum Dental, Melbourne.' Bottom pill 'Meet your demo clinic'. Teal dental chair timber clinic eucalyptus daylight lower half."
+    },
+    {
+      "file": "carousel-02",
+      "prompt": "Use case: ads-marketing. Generate a single finished portrait dental social graphic for fictional Australian clinic HARBOUR GUM DENTAL, Melbourne. Match attached reference style: deep petrol teal gradient, luminous aqua rounded thin border, bold oversized white and aqua sans-serif headings, realistic photography in lower half, refined subtle wave lines. Top left consistent white tooth-outline with small eucalyptus leaf logo beside HARBOUR GUM / DENTAL. Australian English only. No real clinic details, phone, URL, testimonials, guarantees or prices. Tiny footer 'Fictional clinic • Demo artwork'. Crisp perfectly readable text. 4:5 carousel 02/05. Exact headline 'Growing smiles.\\nIndividual advice.' Exact body 'Every child is different.\\nBring your questions to a dental check-up.' Large beautiful nonclinical 3D tooth model with gentle aqua orbit centred beneath headline."
+    },
+    {
+      "file": "logo",
+      "prompt": "Use case: logo-brand. Create a polished horizontal logo for fictional Australian dental clinic HARBOUR GUM DENTAL. Deep petrol teal rectangular background. White thin tooth outline with pale aqua eucalyptus twig growing alongside, left of exact white widely tracked sans-serif text 'HARBOUR GUM' and smaller 'DENTAL' underneath. Flat clean simple graphic, no gradients on mark, no extra text. Wide 3:1 composition with generous padding. Match logo of teal dental demo artwork from this conversation."
+    }
+  ]
+}

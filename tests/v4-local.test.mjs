@@ -61,8 +61,8 @@ for(const provider of ['codex','antigravity'])test(`Local V4 ${provider} adapter
   const data=await waitFor(async()=>{const d=await call(`/clinics/${c.id}`);if(d.jobs.some(j=>j.status==='failed'))throw Error(JSON.stringify(d.jobs));return d.styles.filter(s=>s.status==='ready').length===3&&d});
   await call(`/clinics/${c.id}/style-selection`,'PUT',{primaryStyleId:data.styles[0].id});
   const {week}=await call(`/clinics/${c.id}/weeks`,'POST',{});await waitFor(async()=>{const {week:w}=await call(`/weeks/${week.id}`);if(w.jobs.some(j=>j.status==='failed'))throw Error(JSON.stringify(w.jobs));return w.items.every(i=>i.status==='planned');});await call(`/weeks/${week.id}/generate`,'POST',{});
-  const ready=await waitFor(async()=>{const {week:w}=await call(`/weeks/${week.id}`);if(w.jobs.some(j=>j.status==='failed'))throw Error(JSON.stringify(w.jobs));return w.ready===7&&w});
-  assert.equal(ready.items.reduce((n,i)=>n+i.frames.length,0),15);
+  const ready=await waitFor(async()=>{const {week:w}=await call(`/weeks/${week.id}`);if(w.jobs.some(j=>j.status==='failed'))throw Error(JSON.stringify(w.jobs));return w.ready===6&&w});
+  assert.equal(ready.items.reduce((n,i)=>n+i.frames.length,0),14);
   for(const item of ready.items){const res=await fetch(`http://127.0.0.1:${port}/api/v4/assets/${item.frames[0].assetId}/original`);const metadata=await sharp(Buffer.from(await res.arrayBuffer())).metadata();assert.equal(metadata.width,1080);assert.equal(metadata.height,item.type==='story'?1920:item.type==='post'?1080:1350)}
   assert.equal((await call(`/weeks/${week.id}/approve`,'POST',{})).week.status,'approved');
   const runs=(await readFile(join(storageRoot,'cli-args.jsonl'),'utf8')).trim().split('\n').map(line=>JSON.parse(line));

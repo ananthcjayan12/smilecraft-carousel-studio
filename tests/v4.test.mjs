@@ -15,8 +15,8 @@ function fixture(){const sqlite=new Database(':memory:');sqlite.exec(migration+p
  return {sqlite,service,call,queued,drain,setup,queryLog,batchCalls,failFrame:n=>brokenPosition=n,setActive:v=>active=v,generated:()=>generated,textCalls,rejectValidation:v=>rejectValidation=v};}
 test('V4 source-backed copy validates for every card, angle and format; unverified claims fail closed',()=>{const c={id:'c',name:'River Dental',brand:{},profile:{facts:[{text:'We are open on Sundays.',status:'imported'}]}};for(const card of KNOWLEDGE_CARDS)for(const angle of card.engagementAngles)for(const format of ['carousel','post','story']){const copy=makeCopy(card,angle,format,c);assert.deepEqual(validateCopy(copy.frames,copy.caption,card,c),{valid:true})}const card=KNOWLEDGE_CARDS[0],copy=makeCopy(card,card.engagementAngles[0],'post',c);for(const unsafe of ['Guaranteed painless care.','99% success.','We are open on Sundays.','Salt cures every tooth infection.'])assert.equal(validateCopy([{heading:copy.frames[0].heading,body:unsafe}],copy.caption,card,c).valid,false);c.profile.facts[0].status='verified';assert.equal(validateCopy([{heading:copy.frames[0].heading,body:'We are open on Sundays.'}],copy.caption,card,c).valid,true)});
 test('V4 planning uses clinic and global cooldown history',()=>{const c={id:'c',profile:{services:[],location:'Kochi'}};const first=rankCards(c)[0],history=[{clinic_id:'c',knowledge_card_id:first.card.id,angle_id:first.angle.id,headline:first.angle.hook,region:'Kochi',generated_at:new Date().toISOString(),status:'published'}];assert.notEqual(rankCards(c,history)[0].card.id,first.card.id);const global={...history[0],clinic_id:'other'};assert.ok(rankCards(c,[global]).find(r=>r.angle.id===first.angle.id).score<first.score);assert.equal(weekStart('2026-10-03'),'2026-09-28')});
-test('V4 weekly pack prioritizes the hero, preserves parallel frames, then supports approval/export access',async()=>{const f=fixture(),{clinic,week}=await f.setup();assert.equal(week.items.length,7);assert.equal(new Set(week.items.map(i=>i.knowledge_card_id)).size,7);assert.deepEqual(week.items.map(i=>i.type),['carousel','carousel','post','story','story','story','story']);assert.equal((await f.call(`/clinics/${clinic.id}/weeks`,'POST',{})).week.id,week.id);await f.call(`/weeks/${week.id}/generate`,'POST',{});assert.equal(f.queued.length,7);assert.equal(f.sqlite.prepare("SELECT COUNT(*) n FROM v4_jobs WHERE kind='frame' AND priority=1").get().n,0);const first=f.queued.splice(0);await Promise.all(first.map(id=>f.service.consume(id)));const writing=f.queued.splice(0);await Promise.all(writing.map(id=>f.service.consume(id)));let current=(await f.call(`/weeks/${week.id}`)).week;assert.equal(current.heroReady,false);assert.equal(current.items[0].copy_status,'approved');assert.equal(current.items[0].frames.filter(i=>i.assetId).length,0);assert.equal(f.queued.length,15);await f.drain();current=(await f.call(`/weeks/${week.id}`)).week;assert.equal(current.ready,7);assert.equal(current.status,'ready');assert.equal(f.generated(),15);const asset=current.items[0].frames[0].assetId;await assert.rejects(f.call(`/assets/${asset}/original`,'GET',undefined,'B'),/Image not found/);await assert.rejects(f.call(`/weeks/${week.id}`,'GET',undefined,'B'),/Week not found/);await assert.rejects(f.call(`/clinics/${clinic.id}`,'GET',undefined,'B'),/Clinic not found/);const approved=(await f.call(`/weeks/${week.id}/approve`,'POST',{})).week;assert.equal(approved.status,'approved');assert.ok(approved.items.every(i=>i.status==='approved'));f.sqlite.close()});
-test('V4 failed frames retry without recreating successful artwork, edits regenerate only changed frames',async()=>{const f=fixture(),{week}=await f.setup();f.failFrame(3);await f.call(`/weeks/${week.id}/generate`,'POST',{});await f.drain();let current=(await f.call(`/weeks/${week.id}`)).week;assert.equal(current.heroReady,false);assert.equal(current.items[0].frames.filter(i=>i.assetId).length,4);await assert.rejects(f.call(`/weeks/${week.id}/approve`,'POST',{}),/artwork must be ready/);const failed=current.jobs.filter(j=>j.status==='failed');f.failFrame(0);for(const j of failed)await f.call(`/jobs/${j.id}/retry`,'POST',{});await f.drain();current=(await f.call(`/weeks/${week.id}`)).week;assert.equal(current.ready,7);const item=current.items[0],previous=item.frames.map(f=>f.assetId),frames=item.frames.map(f=>({heading:f.heading,body:f.body}));frames[1].body=frames[2].body;await f.call(`/content/${item.id}`,'PUT',{revision:item.revision,caption:item.caption,frames});const edited=(await f.call(`/weeks/${week.id}`)).week.items[0];assert.equal(edited.frames[0].assetId,previous[0]);assert.equal(edited.frames[1].assetId,'');await f.drain();const ready=(await f.call(`/weeks/${week.id}`)).week.items[0];assert.notEqual(ready.frames[1].assetId,previous[1]);assert.equal(ready.frames[2].assetId,previous[2]);await assert.rejects(f.call(`/content/${item.id}`,'PUT',{revision:item.revision}),/Content changed/);f.sqlite.close()});
+test('V4 weekly pack prioritizes the hero, preserves parallel frames, then supports approval/export access',async()=>{const f=fixture(),{clinic,week}=await f.setup();assert.equal(week.items.length,6);assert.equal(new Set(week.items.map(i=>i.knowledge_card_id )).size,6);assert.deepEqual(week.items.map(i=>i.type),['carousel','carousel','post','post','story','story']);assert.equal((await f.call(`/clinics/${clinic.id}/weeks`,'POST',{})).week.id,week.id);await f.call(`/weeks/${week.id}/generate`,'POST',{});assert.equal(f.queued.length,6);assert.equal(f.sqlite.prepare("SELECT COUNT(*) n FROM v4_jobs WHERE kind='frame' AND priority=1").get().n,0);const first=f.queued.splice(0);await Promise.all(first.map(id=>f.service.consume(id)));const writing=f.queued.splice(0);await Promise.all(writing.map(id=>f.service.consume(id)));let current=(await f.call(`/weeks/${week.id}`)).week;assert.equal(current.heroReady,false);assert.equal(current.items[0].copy_status,'approved');assert.equal(current.items[0].frames.filter(i=>i.assetId).length,0);assert.equal(f.queued.length,14);await f.drain();current=(await f.call(`/weeks/${week.id}`)).week;assert.equal(current.ready,6);assert.equal(current.status,'ready');assert.equal(f.generated(),14);const asset=current.items[0].frames[0].assetId;await assert.rejects(f.call(`/assets/${asset}/original`,'GET',undefined,'B'),/Image not found/);await assert.rejects(f.call(`/weeks/${week.id}`,'GET',undefined,'B'),/Week not found/);await assert.rejects(f.call(`/clinics/${clinic.id}`,'GET',undefined,'B'),/Clinic not found/);const approved=(await f.call(`/weeks/${week.id}/approve`,'POST',{})).week;assert.equal(approved.status,'approved');assert.ok(approved.items.every(i=>i.status==='approved'));f.sqlite.close()});
+test('V4 failed frames retry without recreating successful artwork, edits regenerate only changed frames',async()=>{const f=fixture(),{week}=await f.setup();f.failFrame(3);await f.call(`/weeks/${week.id}/generate`,'POST',{});await f.drain();let current=(await f.call(`/weeks/${week.id}`)).week;assert.equal(current.heroReady,false);assert.equal(current.items[0].frames.filter(i=>i.assetId).length,4);await assert.rejects(f.call(`/weeks/${week.id}/approve`,'POST',{}),/artwork must be ready/);const failed=current.jobs.filter(j=>j.status==='failed');f.failFrame(0);for(const j of failed)await f.call(`/jobs/${j.id}/retry`,'POST',{});await f.drain();current=(await f.call(`/weeks/${week.id}`)).week;assert.equal(current.ready,6);const item=current.items[0],previous=item.frames.map(f=>f.assetId),frames=item.frames.map(f=>({heading:f.heading,body:f.body}));frames[1].body=frames[2].body;await f.call(`/content/${item.id}`,'PUT',{revision:item.revision,caption:item.caption,frames});const edited=(await f.call(`/weeks/${week.id}`)).week.items[0];assert.equal(edited.frames[0].assetId,previous[0]);assert.equal(edited.frames[1].assetId,'');await f.drain();const ready=(await f.call(`/weeks/${week.id}`)).week.items[0];assert.notEqual(ready.frames[1].assetId,previous[1]);assert.equal(ready.frames[2].assetId,previous[2]);await assert.rejects(f.call(`/content/${item.id}`,'PUT',{revision:item.revision}),/Content changed/);f.sqlite.close()});
 test('V4 activation rejection leaves reviewed content intact; style choices are clinic scoped',async()=>{const f=fixture(),{clinic,week}=await f.setup();await f.call(`/weeks/${week.id}/generate`,'POST',{});await f.drain();const item=(await f.call(`/weeks/${week.id}`)).week.items[0];f.setActive(false);await assert.rejects(f.call(`/content/${item.id}/generate`,'POST',{}),/Awaiting activation/);assert.equal((await f.call(`/weeks/${week.id}`)).week.items[0].revision,item.revision);const other=(await f.call('/clinics','POST',{name:'Other'})).clinic;await assert.rejects(f.call(`/clinics/${other.id}/style-selection`,'PUT',{primaryStyleId:clinic.styleSelection.primaryStyleId}),/Choose a ready style/);await assert.rejects(f.call(`/clinics/${clinic.id}/profile`,'PUT',{revision:1,name:'stale'}),/details changed/);f.sqlite.close()});
 test('V4 website imports reject private addresses, redirect escapes, oversized pages and extract candidate facts only',async()=>{for(const url of ['http://clinic.com','https://127.0.0.1','https://[::1]','https://192.168.1.1','https://clinic.local','https://u:p@clinic.com','https://clinic.com:444'])assert.throws(()=>publicUrl(url));await assert.rejects(publicFetch('https://clinic.com',async()=>new Response(null,{status:302,headers:{location:'http://127.0.0.1/'}})),/public HTTPS/);await assert.rejects(publicFetch('https://clinic.com',async()=>new Response('x'.repeat(2000001))),/too large/);const html='<title>River Dental | Home</title><meta name="theme-color" content="#112233"><script type="application/ld+json">{"@type":"Dentist","name":"River Dental","address":{"addressLocality":"Kochi"},"telephone":"+91 1234567890"}</script><p>General dentistry, whitening</p>';const extracted=extractCandidates(html,'https://clinic.com');assert.equal(extracted.name,'River Dental');assert.equal(extracted.location,'Kochi');assert.equal(extracted.primary,'#112233');assert.equal(extracted.facts[0].status,'imported')});
 
@@ -38,7 +38,7 @@ test('Standalone formats require copy review, send real references, and preserve
   // Next format starts with a fresh counter comparison, using actual number of prior images.
   const before=f.generated();assert.equal(before,(type==='carousel'?5:type==='story'?6:7));
  }
- const library=(await f.call(`/clinics/${clinic.id}/library`)).items;assert.equal(library.filter(i=>i.week_id===null).length,3);assert.equal((await f.call(`/weeks/${week.id}`)).week.total,7);
+ const library=(await f.call(`/clinics/${clinic.id}/library`)).items;assert.equal(library.filter(i=>i.week_id===null).length,3);assert.equal((await f.call(`/weeks/${week.id}`)).week.total,6);
  f.sqlite.close();
 });
 
@@ -132,7 +132,7 @@ test('Changing a weekly topic selects a different source without starting genera
   assert.notEqual(next.knowledge_card_id,before.knowledge_card_id);assert.ok(!others.includes(next.knowledge_card_id));
   assert.equal(next.type,original.type);assert.equal(next.status,'planned');assert.equal(next.frames.length,0);assert.equal(next.brief.prepared,false);assert.equal(f.queued.length,0);
  }
- assert.equal((await f.call(`/weeks/${week.id}`)).week.items.length,7);
+ assert.equal((await f.call(`/weeks/${week.id}`)).week.items.length,6);
  await f.call(`/weeks/${week.id}/generate`,'POST',{stage:'brief'});await f.drain();
  const prepared=(await f.call(`/weeks/${week.id}`)).week.items[0];assert.ok(prepared.frames.length);
  await f.call(`/content/${prepared.id}/replace`,'POST',{});const replaced=(await f.call(`/content/${prepared.id}`)).item;
@@ -150,12 +150,12 @@ test('Removing a week cancels queued work, preserves other content, and allows r
  await f.call(`/weeks/${week.id}`,'DELETE');await Promise.all(obsolete.map(id=>f.service.consume(id)));
  await assert.rejects(f.call(`/weeks/${week.id}`),/Week not found/);
  await assert.rejects(f.call(`/content/${week.items[0].id}`),/Content not found/);
- assert.equal((await f.call(`/weeks/${other.id}`)).week.items.length,7);
+ assert.equal((await f.call(`/weeks/${other.id}`)).week.items.length,6);
  assert.equal((await f.call(`/content/${item.id}`)).item.copy_status,'validated');
- const library=(await f.call(`/clinics/${clinic.id}/library`)).items;assert.equal(library.length,8);
+ const library=(await f.call(`/clinics/${clinic.id}/library`)).items;assert.equal(library.length,7);
  assert.equal(f.sqlite.prepare('SELECT COUNT(*) n FROM v4_jobs WHERE week_id=?').get(week.id).n,0);
  const replanned=(await f.call(`/clinics/${clinic.id}/weeks`,'POST',{weekStart:week.week_start})).week;
- assert.notEqual(replanned.id,week.id);assert.equal(replanned.items.length,7);assert.ok(replanned.items.every(i=>i.status==='planned'));assert.equal(f.generated(),0);
+ assert.notEqual(replanned.id,week.id);assert.equal(replanned.items.length,6);assert.ok(replanned.items.every(i=>i.status==='planned'));assert.equal(f.generated(),0);
  f.sqlite.close();
 });
 
@@ -182,7 +182,7 @@ test('Publication is explicit, persists after deletion, and skipped/replaced pla
 test('weekly planning reuses shared history, styles and provider checks',async()=>{
  const f=fixture();try{const {clinic}=await f.setup();f.queryLog.length=0;
  const {week}=await f.call(`/clinics/${clinic.id}/weeks`,'POST',{weekStart:'2030-01-07'});
- assert.equal(week.items.length,7);assert.equal(new Set(week.items.map(i=>i.knowledge_card_id)).size,7);
+ assert.equal(week.items.length,6);assert.equal(new Set(week.items.map(i=>i.knowledge_card_id )).size,6);
  assert.equal(f.queryLog.filter(q=>q.startsWith('SELECT u.* FROM v4_usage')).length,1);
  assert.equal(f.queryLog.filter(q=>q.startsWith('SELECT tasks_json FROM v4_provider_settings')).length,1);
  assert.ok(f.queryLog.length<=25,`Expected at most 25 queries, got ${f.queryLog.length}`);
@@ -192,7 +192,7 @@ test('weekly planning reuses shared history, styles and provider checks',async()
 test('weekly plan and content are persisted atomically in one batch',async()=>{
  const f=fixture();try{const {clinic}=await f.setup();f.batchCalls.length=0;
  const {week}=await f.call(`/clinics/${clinic.id}/weeks`,'POST',{weekStart:'2030-02-04'});
- assert.deepEqual(f.batchCalls,[15,3]);assert.equal(week.items.length,7);
+ assert.deepEqual(f.batchCalls,[13,3]);assert.equal(week.items.length,6);
  const latest=await f.call(`/clinics/${clinic.id}/weeks?latest=1`);assert.equal(latest.week.id,week.id);
  const empty=(await f.call('/clinics','POST',{name:'Empty clinic'})).clinic;
  assert.equal((await f.call(`/clinics/${empty.id}/weeks?latest=1`)).week,null);
@@ -201,8 +201,8 @@ test('weekly plan and content are persisted atomically in one batch',async()=>{
 });
 test('competing requests for the same week produce only one complete plan',async()=>{
  const f=fixture();try{const {clinic}=await f.setup();const plans=await Promise.all([1,2].map(()=>f.call(`/clinics/${clinic.id}/weeks`,'POST',{weekStart:'2030-03-04'})));
- assert.equal(plans[0].week.id,plans[1].week.id);assert.equal(plans[0].week.items.length,7);
- assert.equal(f.sqlite.prepare('SELECT COUNT(*) n FROM v4_content WHERE week_id=?').get(plans[0].week.id).n,7);
+ assert.equal(plans[0].week.id,plans[1].week.id);assert.equal(plans[0].week.items.length,6);
+ assert.equal(f.sqlite.prepare('SELECT COUNT(*) n FROM v4_content WHERE week_id=?').get(plans[0].week.id).n,6);
  }finally{f.sqlite.close();}
 });
 test('a failed planning batch leaves no empty week or partial content',async()=>{
@@ -217,7 +217,7 @@ test('a failed planning batch leaves no empty week or partial content',async()=>
 test('library bundles weeks and items while review batches content and jobs',async()=>{
  const f=fixture();try{const {clinic,week}=await f.setup();f.batchCalls.length=0;
  const library=await f.call(`/clinics/${clinic.id}/library?weeks=1`);
- assert.equal(library.items.length,7);assert.equal(library.weeks[0].id,week.id);assert.deepEqual(f.batchCalls,[2]);
+ assert.equal(library.items.length,6);assert.equal(library.weeks[0].id,week.id);assert.deepEqual(f.batchCalls,[2]);
  f.batchCalls.length=0;const review=await f.call(`/content/${week.items[0].id}`);
  assert.equal(review.item.id,week.items[0].id);assert.deepEqual(f.batchCalls,[2]);
  assert.equal(review.item.published,false);

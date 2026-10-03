@@ -1,3 +1,4 @@
+import {clinicPlan} from '../../web/v4/plan.js';
 import {normalizeImageOptions} from '../../web/image-options.js';
 import {STYLE_REFERENCES} from './image-prompts.mjs';
 import { KNOWLEDGE_CARDS, cardById, rankCards } from './knowledge.mjs';
@@ -116,16 +117,16 @@ export function createV4Service(platform){
  async function plan(account,clinicId,date){
   const c=await clinic(account,clinicId);if(c.status!=='active')throw fail('Confirm clinic facts and choose a primary style first.');
   await taskChoice(account,'writing');
-  const start=weekStart(date||new Date()),existing=await first('SELECT id FROM v4_weeks WHERE clinic_id=? AND week_start=?',clinicId,start);if(existing){const data=await getWeek(account,existing.id);if(data.week.itemCount!==7)throw fail('Your content plan is being prepared. Please try again in a moment.',409);return data;}
+  const start=weekStart(date||new Date()),existing=await first('SELECT id FROM v4_weeks WHERE clinic_id=? AND week_start=?',clinicId,start);if(existing){const data=await getWeek(account,existing.id);if(data.week.itemCount<clinicPlan.weeklyTypes.length)throw fail('Your content plan is being prepared. Please try again in a moment.',409);return data;}
   // Validate shared inputs once; topic ranking stays sequential to keep the pack unique.
   const [history,readyStyles]=await Promise.all([
    all("SELECT u.* FROM v4_usage u WHERE (u.clinic_id=? OR u.generated_at>?) AND (u.status='published' OR EXISTS(SELECT 1 FROM v4_content c WHERE c.id=u.content_id AND c.account_id=u.account_id AND c.knowledge_card_id=u.knowledge_card_id AND c.status!='skipped')) ORDER BY u.generated_at DESC",c.id,new Date(Date.now()-90*86400000).toISOString()),
    all("SELECT id FROM v4_styles WHERE account_id=? AND clinic_id=? AND status='ready'",account,c.id)
   ]);
   const planning={history,styleIds:new Set(readyStyles.map(s=>s.id)),writes:[]};
-  for(const [position,type] of ['carousel','carousel','post','story','story','story','story'].entries())if(!planning.styleIds.has(chooseStyle(c,type,position)))throw fail('Choose a ready style from this clinic.');
+  for(const [position,type] of clinicPlan.weeklyTypes.entries())if(!planning.styleIds.has(chooseStyle(c,type,position)))throw fail('Choose a ready style from this clinic.');
   const weekId=id();write('INSERT OR IGNORE INTO v4_weeks(id,account_id,clinic_id,week_start,created_at) VALUES(?,?,?,?,?)',[weekId,account,clinicId,start,now()],planning);
-  const excluded=[];for(const [position,type] of ['carousel','carousel','post','story','story','story','story'].entries()){
+  const excluded=[];for(const [position,type] of clinicPlan.weeklyTypes.entries()){
    const item=await newItem(account,c,weekId,type,position,excluded,{},planning);excluded.push(item.knowledge_card_id);
   }
   const saved=db.batch?await db.batch(planning.writes):await (async()=>{const results=[];for(const statement of planning.writes)results.push(await statement.run());return results;})();

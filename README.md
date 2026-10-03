@@ -25,7 +25,7 @@ To move storage, set `STORAGE_ROOT=/absolute/path/to/carousel-storage` in `.env`
 1. Add a clinic; import its public website or enter details manually.
 2. Confirm clinic facts, logo and brand colours.
 3. Generate and select clinic styles.
-4. Plan the week: two carousels, one post and four stories.
+4. Plan the week: two carousels, two posts and two stories.
 5. Generate artwork, review and edit it, then approve and download the pack.
 
 Scheduling, publishing integrations and payment checkout are deferred. See the [V4 launch guide](docs/V4-LAUNCH.md) for implementation details and limits.

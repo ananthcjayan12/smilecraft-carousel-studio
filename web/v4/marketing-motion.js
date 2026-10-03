@@ -1,16 +1,16 @@
-import {estimate,money,calcDefaults} from './marketing.js';
+import {estimate,money,calcDefaults,plans} from './marketing.js';
 
 // Film timeline. CSS keyframes inside a scene run while it has .play; these timed events
 // drive the cursor and click states on the same pausable clock.
 const scenes=[
- {dur:7600,nav:3,ev:[[2900,'move','[data-t=s1]'],[3500,'click','[data-t=s1]'],[5000,'move','[data-t=save]'],[5500,'click','[data-t=save]'],[5700,'add','.m-toast']]},
+ {dur:9200,nav:3,ev:[[5000,'move','[data-t=s1]'],[5500,'click','[data-t=s1]'],[6800,'move','[data-t=save]'],[7300,'click','[data-t=save]'],[7500,'add','.m-toast']]},
  {dur:6800,nav:0,ev:[[4300,'move','[data-t=approve]'],[4900,'click','[data-t=approve]']]},
  {dur:8600,nav:0,ev:[[3700,'move','[data-t=fix]'],[4300,'click','[data-t=fix]']]},
  {dur:8200,nav:0,ev:[[600,'text','[data-gen]','Designing slide 1 of 5'],[1500,'text','[data-gen]','Designing slide 2 of 5'],[2400,'text','[data-gen]','Designing slide 3 of 5'],[3300,'text','[data-gen]','Designing slide 4 of 5'],[4200,'text','[data-gen]','Designing slide 5 of 5'],[5200,'text','[data-gen]','✓ 5 slides ready'],[5200,'add','[data-gen]']]},
  {dur:8200,nav:2,ev:[[2600,'move','[data-t=ok]'],[3100,'click','[data-t=ok]'],[3900,'move','[data-t=dl]'],[4400,'click','[data-t=dl]']]}
 ];
 // Credits shown in the sidebar after each scene's generation work (10 per image, 2 per draft).
-const credits=[500,500,498,448,448];
+const credits=[1000,1000,998,948,948];
 let frame,cleanup=[];
 
 export function mountDemo(){
@@ -22,7 +22,7 @@ export function mountDemo(){
 
 function mountFilm(reduce){
  const film=document.querySelector('.m-film');if(!film)return;
- const stage=film.querySelector('.m-film-stage'),canvas=film.querySelector('.m-film-canvas'),cursor=film.querySelector('.m-cursor'),pause=film.querySelector('[data-m="film-pause"]'),bar=film.querySelector('.m-film-progress i');
+ const stage=film.querySelector('.m-film-stage'),canvas=film.querySelector('.m-film-canvas'),cursor=film.querySelector('.m-cursor'),pause=film.querySelector('[data-m="film-pause"]');
  const chapters=[...document.querySelectorAll('[data-m="chapter"]')],sections=[...film.querySelectorAll('.m-sc')];
  let scene=0,elapsed=0,last=0,fired=0,paused=reduce,visible=true;
  const fit=()=>{const w=stage.clientWidth;film.classList.toggle('compact',w<640);film.style.setProperty('--k',String(w/(w<640?600:1000)))};
@@ -39,7 +39,6 @@ function mountFilm(reduce){
   chapters.forEach((c,j)=>{c.setAttribute('aria-pressed',String(j===i));c.querySelector('i').style.setProperty('--p',j<i?1:0)});
   if(finish){scenes[i].ev.forEach(e=>{if(e[1]!=='move')run(e)});cursor.classList.remove('show','tap');film.classList.add('static')}else film.classList.remove('static');
  };
- const total=scenes.reduce((a,s)=>a+s.dur,0);
  const tick=now=>{
   frame=requestAnimationFrame(tick);
   const dt=Math.min(64,now-(last||now));last=now;
@@ -47,7 +46,6 @@ function mountFilm(reduce){
   elapsed+=dt;const ev=scenes[scene].ev;
   while(fired<ev.length&&ev[fired][0]<=elapsed)run(ev[fired++]);
   const p=Math.min(1,elapsed/scenes[scene].dur);chapters[scene]?.querySelector('i').style.setProperty('--p',p);
-  bar.style.transform=`scaleX(${(scenes.slice(0,scene).reduce((a,s)=>a+s.dur,0)+elapsed)/total})`;
   if(elapsed>=scenes[scene].dur)enter((scene+1)%scenes.length);
  };
  const setPaused=value=>{paused=value;film.classList.toggle('paused',paused);pause.innerHTML=`<span aria-hidden="true">${paused?'▶':'❚❚'}</span>`;pause.setAttribute('aria-label',paused?'Play animation':'Pause animation')};
@@ -88,14 +86,14 @@ function mountCalc(){
   const r=estimate(v);
   out('hours').textContent=`${r.hours.toLocaleString('en-US')} hours of design time`;
   count('designer',r.designer);
-  out('plan').textContent=r.plan?r.plan.name:'Custom';
-  out('credits').textContent=r.plan?`${r.credits} of ${r.plan.credits} credits`:`${r.credits} credits: more than our largest plan`;
-  out('price').textContent=r.plan?money(r.plan.price):'Let’s talk';
+  out('plan').textContent=r.plan?r.plan.name:'Allowance exceeded';
+  out('credits').textContent=r.plan?`${r.credits} of ${r.plan.credits} credits`:`${r.credits} credits: above the 1,000-credit monthly allowance`;
+  out('price').textContent=money(plans[0].price);
   const max=Math.max(r.designer,r.plan?.price||0,1);
   box.querySelector('[data-bar="designer"]').style.setProperty('--w',`${Math.max(3,r.designer/max*100)}%`);
   box.querySelector('[data-bar="srshti"]').style.setProperty('--w',r.plan?`${Math.max(3,r.plan.price/max*100)}%`:'100%');
   const save=box.querySelector('.m-save');save.classList.toggle('none',!r.plan||!r.saving);
-  if(r.plan){count('saving',r.saving);out('year').textContent=money(r.saving*12)}else{out('saving').textContent='Custom plan';out('year').textContent='contact us';shown.saving=null}
+  if(r.plan){count('saving',r.saving);out('year').textContent=money(r.saving*12)}else{out('saving').textContent='Allowance exceeded';out('year').textContent='contact us';shown.saving=null}
  };
  box.addEventListener('input',update);update();cleanup.push(()=>box.removeEventListener('input',update));
 }
