@@ -30,4 +30,6 @@ test('demo route opens a seeded clinic and rejects a wrong password when one is 
  assert.match((await authRoute(req('Rosebay','wrong'),{...env,DEMO_PASSWORD:'smile'},url)).headers.get('Location'),/error=/);
  assert.equal((await authRoute(req('Rosebay','smile'),{...env,DEMO_PASSWORD:'smile'},url)).headers.get('Location'),'https://app.test/');
  assert.equal((await authRoute(req('Rosebay','whatever'),{...env,DEMO_PASSWORD:'any'},url)).headers.get('Location'),'https://app.test/');
+ assert.equal((await authRoute(req('Rosebay',' Smile '),{...env,DEMO_PASSWORD:'smile\n'},url)).headers.get('Location'),'https://app.test/');
+ assert.equal((await authRoute(req('Rosebay','whatever'),{...env,DEMO_PASSWORD:' any \n'},url)).headers.get('Location'),'https://app.test/');
 });

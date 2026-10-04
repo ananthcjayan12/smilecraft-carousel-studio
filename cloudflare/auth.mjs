@@ -83,7 +83,9 @@ export async function authRoute(request, env, url) {
     if (!demoLoginEnabled(env)) return json({ error: 'Demo sign-in is not enabled.' }, 404);
     if (request.headers.get('Origin') !== env.APP_ORIGIN) return json({ error: 'Not authorized.' }, 403);
     const form = await request.formData().catch(() => null);
-    if (env.DEMO_PASSWORD && env.DEMO_PASSWORD !== 'any' && form?.get('password') !== env.DEMO_PASSWORD) return back('That demo password is not correct.');
+    // Pasted secrets often carry stray whitespace/newlines; demo passwords are not case-sensitive.
+    const expected = String(env.DEMO_PASSWORD || '').trim().toLowerCase();
+    if (expected && expected !== 'any' && String(form?.get('password') || '').trim().toLowerCase() !== expected) return back('That demo password is not correct.');
     const { results } = await env.DB.prepare("SELECT id,identity_subject FROM users WHERE identity_provider='demo'").all();
     const user = matchDemoUser(results, form?.get('clinic'));
     if (!user) return back('No demo clinic matches that name.');
