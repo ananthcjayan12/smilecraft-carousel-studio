@@ -4,6 +4,7 @@ import { readFile, readdir } from 'node:fs/promises';
 import Database from 'better-sqlite3';
 import sharp from 'sharp';
 import { cloudV4 } from '../cloudflare/v4.mjs';
+import { authRoute } from '../cloudflare/auth.mjs';
 import { seedPlan, demoIds, DEMO_CREDITS } from '../scripts/demo/seed.mjs';
 import { DEMO_CLINICS, ASSET_DIR } from '../server/v4/demo-clinics.mjs';
 
@@ -17,7 +18,7 @@ async function seeded({ ready = true } = {}) {
   const { sql, uploads } = seedPlan(manifest, new Date('2026-10-04T09:00:00Z'), { ready });
   sqlite.exec(sql); sqlite.exec(sql); // re-running resets rather than duplicating
   const objects = new Map(await Promise.all(uploads.map(async u => [u.key, { bytes: await readFile(u.file), httpMetadata: { contentType: u.mime } }])));
-  const DB = { prepare: sql => ({ bind: (...v) => { const s = sqlite.prepare(sql); return { first: async () => s.get(...v) || null, run: async () => ({ meta: s.run(...v) }), all: async () => ({ results: s.all(...v) }) }; } }) };
+  const DB = { prepare: sql => ({ all: async () => ({ results: sqlite.prepare(sql).all() }), bind: (...v) => { const s = sqlite.prepare(sql); return { first: async () => s.get(...v) || null, run: async () => ({ meta: s.run(...v) }), all: async () => ({ results: s.all(...v) }) }; } }) };
   const queued = [], png = await sharp({ create: { width: 40, height: 40, channels: 3, background: '#fff' } }).png().toBuffer();
   const IMAGES = { info: async s => sharp(Buffer.from(await new Response(s).arrayBuffer())).metadata(), input: s => ({ transform() { return this; }, async output() { const b = await sharp(Buffer.from(await new Response(s).arrayBuffer())).png().toBuffer(); return { response: () => new Response(b) }; } }) };
   const env = { DEMO_PAUSE_SCALE: '0', DB, IMAGES, APP_ORIGIN: 'https://studio.test', OPENAI_API_KEY: 'test-only', GENERATION: { send: async b => queued.push(b.v4JobId) },
@@ -25,7 +26,7 @@ async function seeded({ ready = true } = {}) {
   const service = cloudV4(env);
   const drain = async () => { while (queued.length) await Promise.all(queued.splice(0).map(id => service.consume(id))); };
   const call = async (account, path, method = 'GET', body) => { const r = await service.route(new Request(`https://studio.test/api/v4${path}`, { method, body: body && JSON.stringify(body), headers: { 'Content-Type': 'application/json' } }), account, new URL(`https://studio.test/api/v4${path}`)); if (!r.ok) throw new Error((await r.json()).error); return r.headers.get('Content-Type')?.includes('json') ? r.json() : r; };
-  return { sqlite, call, service, queued, png, uploads, drain };
+  return { sqlite, call, service, queued, png, uploads, drain, env };
 }
 
 test('demo seed --ready restores two active clinics with their prepared week', async () => {
@@ -93,6 +94,19 @@ test('demo accounts replay onboarding, styles, week plan and artwork from the pr
   assert.doesNotMatch(f.sqlite.prepare('SELECT preview_key FROM v4_assets WHERE id=?').get(live.frames[0].assetId).preview_key, /\/demo\//);
   // Replayed images cost nothing; the live post costs one normal generation.
   assert.equal(f.sqlite.prepare('SELECT SUM(amount) n FROM credit_ledger WHERE account_id=?').get(A).n, DEMO_CREDITS - 10);
+  // Signing in again restarts the flow at onboarding instead of showing the finished week.
+  const login = new URL('https://studio.test/api/auth/demo');
+  const signIn = await authRoute(new Request(login, { method: 'POST', headers: { Origin: 'https://studio.test' }, body: new URLSearchParams({ clinic: clinic.name }) }), { ...f.env, DEMO_LOGIN: 'on', DB: { ...f.env.DB, batch: async statements => { for (const s of statements) await s.run(); } } }, login);
+  assert.equal(signIn.headers.get('Location'), 'https://studio.test/');
+  const again = await f.call(A, `/clinics/${ids.clinic}`);
+  assert.equal(again.clinic.status, 'onboarding');
+  assert.equal(again.clinic.profile.confirmed, false);
+  assert.equal(again.clinic.brand.logoAssetId, c.brand.logoAssetId);
+  assert.equal((await f.call(A, `/assets/${c.brand.logoAssetId}/preview`)).headers.get('Content-Type'), 'image/webp');
+  assert.deepEqual(again.styles, []);
+  assert.equal((await f.call(A, `/clinics/${ids.clinic}/weeks?latest=1`)).week, null);
+  assert.equal(f.sqlite.prepare('SELECT COUNT(*) n FROM v4_assets WHERE account_id=?').get(A).n, 1);
+  assert.equal(f.sqlite.prepare('SELECT SUM(amount) n FROM credit_ledger WHERE account_id=?').get(A).n, DEMO_CREDITS);
   f.sqlite.close();
 });
 

@@ -127,6 +127,27 @@ export const DEMO_CLINICS = [
 // artwork come back from prepared files, so a full onboarding-to-week demo runs in seconds.
 export const demoIds = clinic => ({ account: `demo-acct-${clinic.key}`, user: `demo-user-${clinic.key}`, clinic: `demo-clinic-${clinic.key}` });
 export const demoClinicFor = account => DEMO_CLINICS.find(c => demoIds(c).account === account) || null;
+export const DEMO_CREDITS = 200;
+export const demoAssetId = (clinic, name) => `demo-asset-${clinic.key}-${name}`;
+// Clinic row JSON as the seed writes it; the demo sign-in reuses it to restart onboarding.
+export function demoClinicState(clinic, { ready = false, styleIds = [] } = {}) {
+  return {
+    profile: { website: '', instagram: '', goal: 'Educate existing patients', emphasis: '', ...clinic.profile, language: 'English', confirmed: ready, facts: [] },
+    brand: { ...clinic.brand, logoAssetId: demoAssetId(clinic, 'logo') },
+    styleSelection: ready ? { primaryStyleId: styleIds[0], secondaryStyleIds: styleIds.slice(1) } : {}
+  };
+}
+// Every demo sign-in restarts at onboarding (logo kept), so each login replays the whole flow.
+// Returns [sql, ...params] statements; children before parents (D1 enforces foreign keys).
+export function demoResetStatements(clinic, now = new Date()) {
+  const ids = demoIds(clinic), A = ids.account, at = now.toISOString(), { profile, brand, styleSelection } = demoClinicState(clinic);
+  return [
+    ...['v4_jobs', 'v4_usage', 'v4_content', 'v4_weeks', 'v4_styles', 'credit_reservations', 'credit_ledger'].map(table => [`DELETE FROM ${table} WHERE account_id=?`, A]),
+    ['DELETE FROM v4_assets WHERE account_id=? AND id<>?', A, demoAssetId(clinic, 'logo')],
+    ["UPDATE v4_clinics SET name=?,profile_json=?,brand_json=?,style_json=?,status='onboarding',revision=revision+1,updated_at=? WHERE id=? AND account_id=?", clinic.name, JSON.stringify(profile), JSON.stringify(brand), JSON.stringify(styleSelection), at, ids.clinic, A],
+    ["INSERT INTO credit_ledger(id,account_id,amount,kind,source_id) VALUES(?,?,?,'manual_plan','demo-seed')", `demo-credit-${clinic.key}`, A, DEMO_CREDITS]
+  ];
+}
 // R2 prefix of a prepared image (original / preview / thumb), uploaded by scripts/demo/seed.mjs.
 export const demoImagePrefix = (clinic, name) => `${demoIds(clinic).account}/v4/${demoIds(clinic).clinic}/demo/${name}`;
 export function demoStyleImage(clinic, referenceId) {

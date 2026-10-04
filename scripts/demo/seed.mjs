@@ -1,5 +1,6 @@
 // Seeds (or resets) the demo clinic accounts in Cloudflare D1 + R2.
 //   node scripts/demo/seed.mjs                 reset to the start of onboarding (logo uploaded)
+//                                              (demo sign-in also does this on every login)
 //   node scripts/demo/seed.mjs --ready         reset to a finished week (fallback demo)
 //   node scripts/demo/seed.mjs --skip-uploads  database only; images already in R2
 //   node scripts/demo/seed.mjs --dry-run       print the SQL and upload list only
@@ -12,11 +13,10 @@ import { spawn } from 'node:child_process';
 import { checkDraft } from '../../server/v4/content-prompts.mjs';
 import { STYLE_REFERENCES } from '../../server/v4/image-prompts.mjs';
 import { weekStart } from '../../server/v4/service.mjs';
-import { DEMO_CLINICS, ASSET_DIR, demoIds, demoImagePrefix, demoWeekItems } from '../../server/v4/demo-clinics.mjs';
+import { DEMO_CLINICS, DEMO_CREDITS, ASSET_DIR, demoIds, demoAssetId, demoClinicState, demoImagePrefix, demoWeekItems } from '../../server/v4/demo-clinics.mjs';
 import { demoImages } from './build-assets.mjs';
 
-export { demoIds };
-export const DEMO_CREDITS = 200;
+export { demoIds, DEMO_CREDITS };
 const q = v => v === null || v === undefined ? 'NULL' : typeof v === 'number' ? String(v) : `'${String(v).replaceAll("'", "''")}'`;
 const insert = (table, row) => `INSERT INTO ${table}(${Object.keys(row).join(',')}) VALUES(${Object.values(row).map(q).join(',')});`;
 const VARIANTS = [['original', 'original.png', 'image/png'], ['preview', 'preview.webp', 'image/webp'], ['thumb', 'thumb.webp', 'image/webp']];
@@ -24,7 +24,7 @@ const VARIANTS = [['original', 'original.png', 'image/png'], ['preview', 'previe
 export function seedPlan(manifest, now = new Date(), { ready = false } = {}) {
   const sql = [], uploads = [], at = now.toISOString(), week = weekStart(now);
   for (const clinic of DEMO_CLINICS) {
-    const ids = demoIds(clinic), A = ids.account, assetId = name => `demo-asset-${clinic.key}-${name}`;
+    const ids = demoIds(clinic), A = ids.account, assetId = name => demoAssetId(clinic, name);
     // Reset: children before parents (D1 enforces foreign keys).
     for (const table of ['v4_jobs', 'v4_usage', 'v4_content', 'v4_weeks', 'v4_styles', 'v4_assets', 'v4_clinics', 'credit_reservations', 'credit_ledger']) sql.push(`DELETE FROM ${table} WHERE account_id=${q(A)};`);
     sql.push(`INSERT OR IGNORE INTO accounts(id,name) VALUES(${q(A)},${q(clinic.name)});`,
@@ -41,10 +41,7 @@ export function seedPlan(manifest, now = new Date(), { ready = false } = {}) {
       if (image.name === 'logo' || ready) sql.push(insert('v4_assets', { id: assetId(image.name), account_id: A, clinic_id: ids.clinic, mime: 'image/png', original_key: `${prefix}/original`, preview_key: `${prefix}/preview`, thumbnail_key: `${prefix}/thumb`, width: stats.width, height: stats.height, size: stats.size, created_at: at }));
     }
     const styleIds = clinic.styles.map(s => `demo-style-${clinic.key}-${s.key}`);
-    const c = { id: ids.clinic, account_id: A, name: clinic.name,
-      profile: { website: '', instagram: '', goal: 'Educate existing patients', emphasis: '', ...clinic.profile, language: 'English', confirmed: ready, facts: [] },
-      brand: { ...clinic.brand, logoAssetId: assetId('logo') },
-      styleSelection: ready ? { primaryStyleId: styleIds[0], secondaryStyleIds: styleIds.slice(1) } : {} };
+    const c = { id: ids.clinic, account_id: A, name: clinic.name, ...demoClinicState(clinic, { ready, styleIds }) };
     sql.push(insert('v4_clinics', { id: c.id, account_id: A, name: c.name, profile_json: JSON.stringify(c.profile), brand_json: JSON.stringify(c.brand), style_json: JSON.stringify(c.styleSelection), status: ready ? 'active' : 'onboarding', revision: 1, created_at: at, updated_at: at }));
     // Onboarding state stops here: the demo then confirms details, creates styles and plans the week.
     if (!ready) continue;

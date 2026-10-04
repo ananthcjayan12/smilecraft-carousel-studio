@@ -1,4 +1,5 @@
 import { createRemoteJWKSet, jwtVerify } from 'jose';
+import { DEMO_CLINICS, demoIds, demoResetStatements } from '../server/v4/demo-clinics.mjs';
 
 const jwks = createRemoteJWKSet(new URL('https://www.googleapis.com/oauth2/v3/certs'));
 const encoder = new TextEncoder();
@@ -89,6 +90,9 @@ export async function authRoute(request, env, url) {
     const { results } = await env.DB.prepare("SELECT id,identity_subject FROM users WHERE identity_provider='demo'").all();
     const user = matchDemoUser(results, form?.get('clinic'));
     if (!user) return back('No demo clinic matches that name.');
+    // Each demo login starts the flow again from onboarding (DEMO_RESET=off keeps progress).
+    const clinic = DEMO_CLINICS.find(c => demoIds(c).user === user.id);
+    if (clinic && env.DEMO_RESET !== 'off') await env.DB.batch(demoResetStatements(clinic).map(([sql, ...params]) => env.DB.prepare(sql).bind(...params)));
     const token = random(), csrf = random();
     await env.DB.prepare('INSERT INTO sessions(token_hash,user_id,csrf,expires_at) VALUES(?,?,?,?)').bind(await digest(token), user.id, csrf, Date.now() + 86400000).run();
     return new Response(null, { status: 302, headers: { Location: `${env.APP_ORIGIN}/`, 'Set-Cookie': cookie('cs_session', token, 86400, secure), 'Cache-Control': 'no-store' } });
