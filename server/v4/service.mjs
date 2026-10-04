@@ -126,9 +126,12 @@ export function createV4Service(platform){
   const planning={history,styleIds:new Set(readyStyles.map(s=>s.id)),writes:[]};
   for(const [position,type] of clinicPlan.weeklyTypes.entries())if(!planning.styleIds.has(chooseStyle(c,type,position)))throw fail('Choose a ready style from this clinic.');
   const weekId=id();write('INSERT OR IGNORE INTO v4_weeks(id,account_id,clinic_id,week_start,created_at) VALUES(?,?,?,?,?)',[weekId,account,clinicId,start,now()],planning);
-  const excluded=[];for(const [position,type] of clinicPlan.weeklyTypes.entries()){
+  // Demo accounts get a prepared week whose copy is already approved, ready for artwork.
+  const scripted=await platform.scriptedWeek?.(account,c,(type,position)=>chooseStyle(c,type,position));
+  if(scripted){const at=now();for(const item of scripted)write('INSERT INTO v4_content(id,account_id,clinic_id,week_id,position,type,knowledge_card_id,angle_id,recipe_id,style_id,topic,caption,frames_json,status,revision,created_at,brief_json,language,copy_status,validation_json,copy_approved_at,context_json) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)',[id(),account,c.id,weekId,item.position,item.type,'','',`${item.type}:custom`,item.styleId,item.topic,item.caption,JSON.stringify(item.frames),'planned',2,new Date(Date.parse(at)+item.position).toISOString(),JSON.stringify(item.brief),'English','approved',JSON.stringify({valid:true,issues:[],at}),at,JSON.stringify(item.context)],planning);}
+  else{const excluded=[];for(const [position,type] of clinicPlan.weeklyTypes.entries()){
    const item=await newItem(account,c,weekId,type,position,excluded,{},planning);excluded.push(item.knowledge_card_id);
-  }
+  }}
   const saved=db.batch?await db.batch(planning.writes):await (async()=>{const results=[];for(const statement of planning.writes)results.push(await statement.run());return results;})();
   if(!saved[0].meta.changes){const winner=await first('SELECT id FROM v4_weeks WHERE account_id=? AND clinic_id=? AND week_start=?',account,clinicId,start);return getWeek(account,winner.id);}
   return getWeek(account,weekId);

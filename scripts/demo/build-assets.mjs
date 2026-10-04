@@ -7,7 +7,7 @@
 import sharp from 'sharp';
 import { mkdir, writeFile, rm } from 'node:fs/promises';
 import { join } from 'node:path';
-import { DEMO_CLINICS, ASSET_DIR } from './clinics.mjs';
+import { DEMO_CLINICS, ASSET_DIR } from '../../server/v4/demo-clinics.mjs';
 
 const CANVAS = { carousel: [1080, 1350], post: [1080, 1350], story: [1080, 1920] };
 

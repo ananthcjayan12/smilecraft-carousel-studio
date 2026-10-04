@@ -1,3 +1,6 @@
+import { contentContext, contactDetails } from './content-prompts.mjs';
+import { STYLE_REFERENCES } from './image-prompts.mjs';
+
 // Demo clinics for hackathon/pitch demos. Fictional clinics; contact numbers use ACMA ranges
 // reserved for fiction. Sources are paths inside dental_dummy_explanation_pack (raw pack, not
 // committed); build-assets.mjs turns them into ASSET_DIR, which seed.mjs uploads.
@@ -119,3 +122,28 @@ export const DEMO_CLINICS = [
     ]
   }
 ].map(c => ({ ...c, items: c.items.map(i => ({ ...i, sources: [ADA] })) }));
+
+// Demo accounts replay this pack instead of calling AI providers: styles, the weekly plan and
+// artwork come back from prepared files, so a full onboarding-to-week demo runs in seconds.
+export const demoIds = clinic => ({ account: `demo-acct-${clinic.key}`, user: `demo-user-${clinic.key}`, clinic: `demo-clinic-${clinic.key}` });
+export const demoClinicFor = account => DEMO_CLINICS.find(c => demoIds(c).account === account) || null;
+// R2 prefix of a prepared image (original / preview / thumb), uploaded by scripts/demo/seed.mjs.
+export const demoImagePrefix = (clinic, name) => `${demoIds(clinic).account}/v4/${demoIds(clinic).clinic}/demo/${name}`;
+export function demoStyleImage(clinic, referenceId) {
+  const style = clinic.styles[STYLE_REFERENCES.indexOf(referenceId)];
+  return style ? { name: style.name, prefix: demoImagePrefix(clinic, style.key) } : null;
+}
+export function demoFrameImage(clinic, item, position) {
+  const [key, data] = String(item.brief?.demoKey || '').split('/');
+  const source = key === clinic.key && clinic.items.find(i => i.key === data)?.frames[position - 1]?.source;
+  return source ? demoImagePrefix(clinic, `${data}-${position}`) : null;
+}
+// The prepared week as content rows: brief and copy approved, artwork still to create.
+export function demoWeekItems(clinic, c, styleIdFor) {
+  return clinic.items.map((item, position) => {
+    const brief = { origin: 'custom', demoKey: `${clinic.key}/${item.key}`, sourceTopic: item.topic, sourceSummary: item.summary, topic: item.topic, summary: item.summary, language: 'English', angle: 'Custom content', facts: item.facts, sources: item.sources, prohibitedClaims: [], sourceRequirement: '', reviewStatus: 'reviewed', libraryEntry: null, contactKeys: Object.keys(contactDetails(c)) };
+    const context = contentContext(c, { type: item.type, language: 'English', brief }), contacts = context.business.contacts;
+    const frames = item.frames.map((f, i) => ({ heading: f.heading, body: f.body, visualPrompt: f.visualPrompt, position: i + 1, assetId: '', approved: false, contacts: i === item.frames.length - 1 ? contacts : {} }));
+    return { key: item.key, live: Boolean(item.live), type: item.type, position, styleId: styleIdFor(item.type, position), topic: item.topic, caption: item.caption, brief, frames, context };
+  });
+}
