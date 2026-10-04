@@ -1,0 +1,38 @@
+name: Seed demo clinics
+# Run manually (Actions → Seed demo clinics → Run workflow) to create or reset the
+# Rosebay Family Dental and Harbour Gum Dental demo accounts with their prepared week.
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: carousel-v3-cloudflare
+  cancel-in-progress: false
+jobs:
+  seed:
+    runs-on: ubuntu-latest
+    environment: production
+    timeout-minutes: 20
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      WORKER_NAME: ${{ vars.WORKER_NAME }}
+      D1_DATABASE_NAME: ${{ vars.D1_DATABASE_NAME }}
+      R2_BUCKET_NAME: ${{ vars.R2_BUCKET_NAME }}
+      QUEUE_NAME: ${{ vars.QUEUE_NAME }}
+      DEAD_QUEUE_NAME: ${{ vars.DEAD_QUEUE_NAME }}
+      APP_ORIGIN: https://studio.srshti.co.in
+      ADMIN_EMAIL: ${{ vars.ADMIN_EMAIL }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - run: npm ci
+      - name: Resolve Cloudflare resources and apply migrations
+        run: |
+          npm run cloudflare:prepare
+          npx --no-install wrangler d1 migrations apply DB --remote --config wrangler.generated.json
+      - name: Upload demo artwork and reset demo accounts
+        run: node scripts/demo/seed.mjs

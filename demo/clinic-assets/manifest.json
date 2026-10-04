@@ -1,0 +1,247 @@
+{
+ "rosebay/logo": {
+  "width": 1200,
+  "height": 400,
+  "size": 66640,
+  "preview": 57762,
+  "thumb": 15132
+ },
+ "rosebay/style-family": {
+  "width": 1448,
+  "height": 1086,
+  "size": 723385,
+  "preview": 84474,
+  "thumb": 15642
+ },
+ "rosebay/style-care": {
+  "width": 1448,
+  "height": 1086,
+  "size": 694082,
+  "preview": 121348,
+  "thumb": 21916
+ },
+ "rosebay/style-journey": {
+  "width": 1448,
+  "height": 1086,
+  "size": 622897,
+  "preview": 129484,
+  "thumb": 24004
+ },
+ "rosebay/whitening-1": {
+  "width": 1080,
+  "height": 1350,
+  "size": 578547,
+  "preview": 158600,
+  "thumb": 30844
+ },
+ "rosebay/whitening-2": {
+  "width": 1080,
+  "height": 1350,
+  "size": 649470,
+  "preview": 163136,
+  "thumb": 31500
+ },
+ "rosebay/whitening-3": {
+  "width": 1080,
+  "height": 1350,
+  "size": 548153,
+  "preview": 120000,
+  "thumb": 25524
+ },
+ "rosebay/whitening-4": {
+  "width": 1080,
+  "height": 1350,
+  "size": 587774,
+  "preview": 154160,
+  "thumb": 30028
+ },
+ "rosebay/whitening-5": {
+  "width": 1080,
+  "height": 1350,
+  "size": 584294,
+  "preview": 144592,
+  "thumb": 27148
+ },
+ "rosebay/first-visit-1": {
+  "width": 1080,
+  "height": 1350,
+  "size": 651575,
+  "preview": 172084,
+  "thumb": 32660
+ },
+ "rosebay/first-visit-2": {
+  "width": 1080,
+  "height": 1350,
+  "size": 614669,
+  "preview": 151068,
+  "thumb": 28034
+ },
+ "rosebay/first-visit-3": {
+  "width": 1080,
+  "height": 1350,
+  "size": 550323,
+  "preview": 119524,
+  "thumb": 23244
+ },
+ "rosebay/first-visit-4": {
+  "width": 1080,
+  "height": 1350,
+  "size": 581862,
+  "preview": 160698,
+  "thumb": 30268
+ },
+ "rosebay/first-visit-5": {
+  "width": 1080,
+  "height": 1350,
+  "size": 620671,
+  "preview": 163376,
+  "thumb": 31054
+ },
+ "rosebay/listening-1": {
+  "width": 1080,
+  "height": 1350,
+  "size": 599379,
+  "preview": 159176,
+  "thumb": 31314
+ },
+ "rosebay/bravery-1": {
+  "width": 1080,
+  "height": 1920,
+  "size": 815319,
+  "preview": 205242,
+  "thumb": 42118
+ },
+ "rosebay/smile-goals-1": {
+  "width": 1080,
+  "height": 1920,
+  "size": 774830,
+  "preview": 190378,
+  "thumb": 39804
+ },
+ "harbourgum/logo": {
+  "width": 1200,
+  "height": 400,
+  "size": 47703,
+  "preview": 52534,
+  "thumb": 13140
+ },
+ "harbourgum/style-board": {
+  "width": 1448,
+  "height": 1086,
+  "size": 606331,
+  "preview": 120548,
+  "thumb": 22746
+ },
+ "harbourgum/style-care": {
+  "width": 1448,
+  "height": 1086,
+  "size": 628109,
+  "preview": 142028,
+  "thumb": 25656
+ },
+ "harbourgum/style-smile": {
+  "width": 1448,
+  "height": 1086,
+  "size": 546882,
+  "preview": 139828,
+  "thumb": 24836
+ },
+ "harbourgum/sensitivity-1": {
+  "width": 1080,
+  "height": 1350,
+  "size": 529137,
+  "preview": 194578,
+  "thumb": 35318
+ },
+ "harbourgum/sensitivity-2": {
+  "width": 1080,
+  "height": 1350,
+  "size": 469323,
+  "preview": 170092,
+  "thumb": 28990
+ },
+ "harbourgum/sensitivity-3": {
+  "width": 1080,
+  "height": 1350,
+  "size": 509722,
+  "preview": 186450,
+  "thumb": 30840
+ },
+ "harbourgum/sensitivity-4": {
+  "width": 1080,
+  "height": 1350,
+  "size": 484311,
+  "preview": 165174,
+  "thumb": 31166
+ },
+ "harbourgum/sensitivity-5": {
+  "width": 1080,
+  "height": 1350,
+  "size": 462363,
+  "preview": 159436,
+  "thumb": 30532
+ },
+ "harbourgum/calm-visit-1": {
+  "width": 1080,
+  "height": 1350,
+  "size": 500666,
+  "preview": 164288,
+  "thumb": 32244
+ },
+ "harbourgum/calm-visit-2": {
+  "width": 1080,
+  "height": 1350,
+  "size": 490159,
+  "preview": 159944,
+  "thumb": 30322
+ },
+ "harbourgum/calm-visit-3": {
+  "width": 1080,
+  "height": 1350,
+  "size": 499096,
+  "preview": 171938,
+  "thumb": 32478
+ },
+ "harbourgum/calm-visit-4": {
+  "width": 1080,
+  "height": 1350,
+  "size": 507580,
+  "preview": 183596,
+  "thumb": 33118
+ },
+ "harbourgum/calm-visit-5": {
+  "width": 1080,
+  "height": 1350,
+  "size": 540907,
+  "preview": 202492,
+  "thumb": 35922
+ },
+ "harbourgum/questions-1": {
+  "width": 1080,
+  "height": 1350,
+  "size": 510698,
+  "preview": 182628,
+  "thumb": 33076
+ },
+ "harbourgum/your-pace-1": {
+  "width": 1080,
+  "height": 1350,
+  "size": 505661,
+  "preview": 192740,
+  "thumb": 34270
+ },
+ "harbourgum/nervous-1": {
+  "width": 1080,
+  "height": 1920,
+  "size": 636307,
+  "preview": 210808,
+  "thumb": 41348
+ },
+ "harbourgum/sensitive-check-1": {
+  "width": 1080,
+  "height": 1920,
+  "size": 670480,
+  "preview": 248730,
+  "thumb": 45776
+ }
+}

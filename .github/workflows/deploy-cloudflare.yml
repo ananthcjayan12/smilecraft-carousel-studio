@@ -45,6 +45,8 @@ jobs:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           GOOGLE_CLIENT_ID: ${{ secrets.GOOGLE_CLIENT_ID }}
           GOOGLE_CLIENT_SECRET: ${{ secrets.GOOGLE_CLIENT_SECRET }}
+          DEMO_LOGIN: ${{ secrets.DEMO_LOGIN }}
+          DEMO_PASSWORD: ${{ secrets.DEMO_PASSWORD }}
         run: npm run cloudflare:deploy
       - name: Verify cloud app and account gate
         run: npm run cloudflare:smoke

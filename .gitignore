@@ -1,31 +1,55 @@
 # JavaScript dependencies and build output
 node_modules/
 dist/
+coverage/
+.cache/
+*.tsbuildinfo
 
-# Local configuration and application data
+# Local configuration, secrets and application data
 .env
 .env.*
 !.env.example
+.dev.vars*
+!.dev.vars.example
 storage/
+*.pem
+*.key
+*.p12
+*.pfx
+*.mobileprovision
 
-# Logs and tooling artifacts
+# Logs, temp files and tooling artifacts
 *.log
+npm-debug.log*
+*.tmp
+*.swp
+*~
 .playwright-cli/
-output/playwright/
 .wrangler/
 .worker-build/
 wrangler.generated.json
 .cloudflare-state.json
-.dev.vars*
-!.dev.vars.example
+
+# Local scratch output (files already committed under output/ stay tracked)
+output/
+
+# AI agent / editor local state
+.kilo/
+.claude/settings.local.json
+.claude/worktrees/
+.vscode/*
+!.vscode/extensions.json
+.idea/
 
 # OS files
 .DS_Store
+._*
+Thumbs.db
+desktop.ini
 
 # Rust / Tauri generated build artifacts
 src-tauri/target/
 src-tauri/gen/schemas/
-
 apps/companion-desktop/src-tauri/target/
 apps/companion-desktop/src-tauri/gen/
 apps/companion-desktop/release-assets/
@@ -33,3 +57,6 @@ apps/companion-desktop/src-tauri/release.config.json
 
 # Generated V4 browser bundle (built before local start, tests and deployment)
 web/v4/studio.bundle.js
+
+# Raw demo design pack (processed copies live in demo/clinic-assets)
+dental_dummy_explanation_pack/

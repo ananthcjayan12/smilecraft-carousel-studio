@@ -4,8 +4,12 @@ import { join } from 'node:path';
 import { spawnSync } from 'node:child_process';
 
 export const providerSecretNames = ['OPENAI_API_KEY', 'GEMINI_API_KEY', 'GOOGLE_CLIENT_ID', 'GOOGLE_CLIENT_SECRET'];
+// Demo sign-in is always written so removing the GitHub secret switches it off again.
 export function providerSecrets(env) {
-  return Object.fromEntries(providerSecretNames.filter(name => env[name]).map(name => [name, env[name]]));
+  const secrets = Object.fromEntries(providerSecretNames.filter(name => env[name]).map(name => [name, env[name]]));
+  secrets.DEMO_LOGIN = env.DEMO_LOGIN === 'on' ? 'on' : 'off';
+  secrets.DEMO_PASSWORD = env.DEMO_PASSWORD || 'any';
+  return secrets;
 }
 
 export async function deploy(env = process.env, run = spawnSync) {
