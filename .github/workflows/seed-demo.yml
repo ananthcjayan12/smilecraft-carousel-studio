@@ -1,7 +1,14 @@
 name: Seed demo clinics
-# Run manually (Actions → Seed demo clinics → Run workflow) to create or reset the
-# Rosebay Family Dental and Harbour Gum Dental demo accounts with their prepared week.
+# Creates or resets the Rosebay Family Dental and Harbour Gum Dental demo accounts with their
+# prepared week. Runs on v5 pushes that touch demo files (the manual "Run workflow" button only
+# appears once this file is on the default branch, main).
 on:
+  push:
+    branches: [v5]
+    paths:
+      - 'demo/**'
+      - 'scripts/demo/**'
+      - '.github/workflows/seed-demo.yml'
   workflow_dispatch:
 permissions:
   contents: read

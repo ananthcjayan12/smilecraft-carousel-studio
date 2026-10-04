@@ -61,11 +61,18 @@ export function seedPlan(manifest, now = new Date()) {
   return { sql: sql.join('\n') + '\n', uploads };
 }
 
-const npx = (args, env = process.env) => new Promise((resolve, reject) => {
+const once = (args, env) => new Promise((resolve, reject) => {
   const child = spawn('npx', ['--no-install', 'wrangler', ...args], { stdio: ['ignore', 'pipe', 'pipe'], env });
   let output = ''; child.stdout.on('data', d => output += d); child.stderr.on('data', d => output += d);
   child.on('close', code => code === 0 ? resolve(output) : reject(new Error(`wrangler ${args.slice(0, 3).join(' ')} failed:\n${output.slice(-1500)}`)));
 });
+// Wrangler network calls fail transiently; every step here is idempotent, so retry.
+async function npx(args, env = process.env) {
+  for (let attempt = 1; ; attempt++) {
+    try { return await once(args, env); }
+    catch (error) { if (attempt === 6) throw error; await new Promise(r => setTimeout(r, 3000 * attempt)); }
+  }
+}
 
 async function main() {
   const dryRun = process.argv.includes('--dry-run');
@@ -74,7 +81,7 @@ async function main() {
   if (dryRun) { process.stdout.write(sql); console.error(`\n${uploads.length} R2 uploads planned.`); return; }
   const config = JSON.parse(await readFile('wrangler.generated.json', 'utf8')), bucket = config.r2_buckets[0].bucket_name;
   let done = 0; const queue = [...uploads];
-  await Promise.all(Array.from({ length: 6 }, async () => {
+  await Promise.all(Array.from({ length: 3 }, async () => {
     for (let u; (u = queue.shift());) {
       await npx(['r2', 'object', 'put', `${bucket}/${u.key}`, '--file', u.file, '--content-type', u.mime, '--remote', '--config', 'wrangler.generated.json']);
       if (++done % 15 === 0 || done === uploads.length) console.log(`Uploaded ${done}/${uploads.length} images`);
