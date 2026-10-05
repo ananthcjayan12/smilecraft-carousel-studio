@@ -12,7 +12,66 @@ function fixture(){const sqlite=new Database(':memory:');sqlite.exec(schema);sql
  const activate=()=>{sqlite.prepare("INSERT INTO subscriptions(account_id,plan_id,plan_version,status) VALUES('A','founding-clinic',1,'manual')").run();sqlite.prepare("INSERT INTO credit_ledger(id,account_id,amount,kind,source_id) VALUES('allocation','A',900,'manual_plan','manual:2026-10')").run()};
  return {sqlite,queued,objects,env,service,call,activate};}
 test('Cloud V4 manual activation gates paid work and refunds provider failures; media variants remain private',async t=>{const f=fixture();const c=(await f.call('/clinics','POST',{name:'River Dental'})).clinic;await assert.rejects(f.call(`/clinics/${c.id}/styles`,'POST',{}),/awaiting activation/);assert.equal(f.queued.length,0);f.activate();let requests=0;t.mock.method(globalThis,'fetch',async(url,options)=>{assert.equal(url,'https://api.openai.com/v1/images/edits');assert.ok(options.body instanceof FormData);assert.equal(options.body.get('model'),'gpt-image-1');if(++requests===1)return new Response('{}',{status:503});return Response.json({data:[{b64_json:png.toString('base64')}]})});await f.call(`/clinics/${c.id}/styles`,'POST',{});await Promise.all(f.queued.splice(0).map(id=>f.service.consume(id)));let data=await f.call(`/clinics/${c.id}`);assert.equal(data.styles.filter(s=>s.status==='ready').length,2);assert.equal(f.sqlite.prepare("SELECT SUM(amount) n FROM credit_ledger WHERE account_id='A'").get().n,880);const failed=data.jobs.find(j=>j.status==='failed');await f.call(`/jobs/${failed.id}/retry`,'POST',{});await f.service.consume(f.queued.shift());data=await f.call(`/clinics/${c.id}`);assert.equal(data.styles.filter(s=>s.status==='ready').length,3);assert.equal(f.sqlite.prepare("SELECT SUM(amount) n FROM credit_ledger WHERE account_id='A'").get().n,870);const asset=f.sqlite.prepare('SELECT * FROM v4_assets LIMIT 1').get();assert.ok(asset.original_key.startsWith(`A/v4/${c.id}/`));assert.equal(asset.width,240);assert.equal(asset.height,180);const response=await f.service.route(new Request(`https://studio.test/api/v4/assets/${asset.id}/thumbnail`),'A',new URL(`https://studio.test/api/v4/assets/${asset.id}/thumbnail`));assert.equal(response.headers.get('Content-Type'),'image/webp');assert.match(response.headers.get('Cache-Control'),/private/);assert.equal(response.headers.get('Vary'),'Cookie');assert.equal((await sharp(Buffer.from(await response.arrayBuffer())).metadata()).format,'webp');f.sqlite.close()});
-test('Cloud V4 produces canonical carousel canvases and uses private clinic styles as references',async t=>{const f=fixture();f.activate();t.mock.method(globalThis,'fetch',async(url,options)=>{if(String(url).includes('chat/completions')){const request=JSON.parse(options.body);return Response.json({choices:[{message:{content:JSON.stringify(mockContent(request.messages[0].content[0].text,request.response_format.json_schema.schema))}}]});}return Response.json({data:[{b64_json:png.toString('base64')}]});});const c=(await f.call('/clinics','POST',{name:'River Dental'})).clinic;await f.call(`/clinics/${c.id}/profile`,'PUT',{revision:c.revision,confirmed:true});await f.call(`/clinics/${c.id}/styles`,'POST',{});await Promise.all(f.queued.splice(0).map(id=>f.service.consume(id)));const {styles}=await f.call(`/clinics/${c.id}`);await f.call(`/clinics/${c.id}/style-selection`,'PUT',{primaryStyleId:styles[0].id});const {week}=await f.call(`/clinics/${c.id}/weeks`,'POST',{});await Promise.all(f.queued.splice(0).map(id=>f.service.consume(id)));await f.call(`/weeks/${week.id}/generate`,'POST',{});while(f.queued.length)await Promise.all(f.queued.splice(0).map(id=>f.service.consume(id)));const current=(await f.call(`/weeks/${week.id}`)).week;assert.equal(current.heroReady,true);assert.equal(f.queued.length,0);const asset=f.sqlite.prepare('SELECT * FROM v4_assets WHERE id=?').get(current.items[0].frames[0].assetId),meta=await sharp(f.objects.get(asset.original_key).bytes).metadata();assert.equal(meta.width,1080);assert.equal(meta.height,1350);assert.equal(f.sqlite.prepare("SELECT SUM(amount) n FROM credit_ledger WHERE account_id='A'").get().n,706);f.sqlite.close()});
+test('Cloud V4 generates native content canvases and preserves provider artwork without resizing',async t=>{
+ const f=fixture();f.activate();f.env.SRSHTI_IMAGE_MODEL='gpt-image-2';
+ const generated=new Map();
+ t.mock.method(globalThis,'fetch',async(url,options)=>{
+  if(String(url).includes('chat/completions')){
+   const request=JSON.parse(options.body);
+   return Response.json({choices:[{message:{content:JSON.stringify(mockContent(request.messages[0].content[0].text,request.response_format.json_schema.schema))}}]});
+  }
+  const form=options.body,size=form.get('size'),[width,height]=size.split('x').map(Number);
+  assert.equal(form.get('model'),'gpt-image-2');assert.ok(form.getAll('image[]').length>0);
+  const bytes=await sharp({create:{width,height,channels:4,background:'#00505a'}}).png().toBuffer();
+  generated.set(size,bytes);return Response.json({data:[{b64_json:bytes.toString('base64')}]});
+ });
+ try{
+  const c=(await f.call('/clinics','POST',{name:'River Dental'})).clinic;
+  await f.call(`/clinics/${c.id}/profile`,'PUT',{revision:c.revision,confirmed:true});
+  await f.call(`/clinics/${c.id}/styles`,'POST',{});await Promise.all(f.queued.splice(0).map(id=>f.service.consume(id)));
+  const {styles}=await f.call(`/clinics/${c.id}`);await f.call(`/clinics/${c.id}/style-selection`,'PUT',{primaryStyleId:styles[0].id});
+  const {week}=await f.call(`/clinics/${c.id}/weeks`,'POST',{});
+  await f.call(`/weeks/${week.id}/generate`,'POST',{});
+  while(f.queued.length)await Promise.all(f.queued.splice(0).map(id=>f.service.consume(id)));
+  const current=(await f.call(`/weeks/${week.id}`)).week;
+  assert.equal(current.heroReady,true);assert.equal(current.ready,current.items.length);
+  for(const item of current.items){
+   const size=item.type==='story'?'864x1536':item.type==='post'?'1024x1024':'1024x1280';
+   for(const frame of item.frames){
+    const asset=f.sqlite.prepare('SELECT * FROM v4_assets WHERE id=?').get(frame.assetId);
+    const bytes=f.objects.get(asset.original_key).bytes,meta=await sharp(bytes).metadata();
+    assert.equal(`${meta.width}x${meta.height}`,size);assert.deepEqual(bytes,generated.get(size));
+   }
+  }
+  assert.equal(f.sqlite.prepare("SELECT SUM(amount) n FROM credit_ledger WHERE account_id='A'").get().n,706);
+ }finally{f.sqlite.close();}
+});
+
+test('Cloud V4 rejects wrong-ratio generated artwork and refunds its credits',async t=>{
+ const f=fixture();f.activate();f.env.SRSHTI_IMAGE_MODEL='gpt-image-2';
+ t.mock.method(globalThis,'fetch',async(url,options)=>{
+  if(String(url).includes('chat/completions')){
+   const request=JSON.parse(options.body);return Response.json({choices:[{message:{content:JSON.stringify(mockContent(request.messages[0].content[0].text,request.response_format.json_schema.schema))}}]});
+  }
+  return Response.json({data:[{b64_json:png.toString('base64')}]});
+ });
+ try{
+  const c=(await f.call('/clinics','POST',{name:'River Dental'})).clinic;
+  await f.call(`/clinics/${c.id}/profile`,'PUT',{revision:c.revision,confirmed:true});
+  await f.call(`/clinics/${c.id}/styles`,'POST',{});await Promise.all(f.queued.splice(0).map(id=>f.service.consume(id)));
+  const {styles}=await f.call(`/clinics/${c.id}`);await f.call(`/clinics/${c.id}/style-selection`,'PUT',{primaryStyleId:styles[0].id});
+  const item=(await f.call(`/clinics/${c.id}/content`,'POST',{type:'carousel',topic:'Daily care'})).item;
+  while(f.queued.length)await Promise.all(f.queued.splice(0).map(id=>f.service.consume(id)));
+  await f.call(`/content/${item.id}/approve-copy`,'POST',{});
+  const balance=f.sqlite.prepare("SELECT SUM(amount) n FROM credit_ledger WHERE account_id='A'").get().n;
+  while(f.queued.length)await Promise.all(f.queued.splice(0).map(id=>f.service.consume(id)));
+  const data=await f.call(`/content/${item.id}`);
+  assert.ok(data.item.frames.every(frame=>!frame.assetId));
+  const failures=data.jobs.filter(job=>job.kind==='frame');assert.equal(failures.length,5);
+  assert.ok(failures.every(job=>job.status==='failed'&&/requires 4:5/.test(job.error)));
+  assert.equal(f.sqlite.prepare("SELECT SUM(amount) n FROM credit_ledger WHERE account_id='A'").get().n,balance);
+ }finally{f.sqlite.close();}
+});
 
 test('only admin can manage shared models; client jobs ignore old account model choices',async()=>{
  const f=fixture(),admin=cloudV4(f.env,{isAdmin:true});f.activate();
