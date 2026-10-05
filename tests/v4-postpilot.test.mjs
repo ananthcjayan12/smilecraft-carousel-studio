@@ -80,3 +80,26 @@ test('publishing panel requires approval and displays status and schedule timezo
  item.status='approved';const html=publishingPanel(item,{configured:true,account:{username:'clinic'},delivery:null});assert.match(html,/Publish now/);assert.match(html,/Schedule for later/);assert.match(html,/Time zone:/);
  assert.doesNotMatch(publishingPanel(item,{configured:true,delivery:{status:'publishing'}}),/data-form="postpilot"/);
 });
+
+test('PostPilot API redirects fail without following or forwarding credentials',async()=>{
+ const calls=[];
+ const client=createPostpilot({baseUrl:'https://postpilot.test',apiKey:'ppk_secret',fetcher:async(url,opts)=>{
+  assert.notEqual(opts.redirect,'error','Cloudflare Workers does not support redirect:error');
+  calls.push({url,opts});return new Response(null,{status:302,headers:{Location:'https://other.test'}});
+ }});
+ await assert.rejects(client.readiness(),/PostPilot request failed \(302\)/);
+ assert.equal(calls.length,1);assert.equal(calls[0].opts.redirect,'manual');
+});
+
+test('signed upload redirects abort without following the redirected URL',async()=>{
+ let aborted=false;
+ const client=createPostpilot({baseUrl:'https://postpilot.test',apiKey:'ppk_secret',fetcher:async(url,opts)=>{
+  assert.notEqual(opts.redirect,'error');
+  if(url.endsWith('/uploads'))return Response.json({id:'u',partSize:8});
+  if(url.endsWith('/parts'))return Response.json({url:'https://media.test/signed',local:false});
+  if(url==='https://media.test/signed'){assert.equal(opts.redirect,'manual');return new Response(null,{status:307,headers:{Location:'https://other.test'}});}
+  if(url.endsWith('/abort')){aborted=true;return Response.json({});}throw Error(url);
+ }});
+ await assert.rejects(client.upload({bytes:new Uint8Array([1]),mime:'image/png'},'slide'),/upload failed/);
+ assert.ok(aborted);
+});

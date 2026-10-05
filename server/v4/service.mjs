@@ -139,12 +139,19 @@ export function createV4Service(platform){
   if(!saved[0].meta.changes){const winner=await first('SELECT id FROM v4_weeks WHERE account_id=? AND clinic_id=? AND week_start=?',account,clinicId,start);return getWeek(account,winner.id);}
   return getWeek(account,weekId);
  }
+ async function syncDraftLanguages(account,c){
+  const language=c.profile.language||'English';
+  // Keep completed artwork and in-flight jobs intact. Unfinished copy must be prepared again.
+  await run("UPDATE v4_content SET language=?,topic=COALESCE(json_extract(brief_json,'$.sourceTopic'),topic),brief_json=json_set(brief_json,'$.language',?,'$.summary',''),caption='',frames_json='[]',copy_status='draft',validation_json='{}',context_json='{}',copy_approved_at=NULL,status='planned',revision=revision+1 WHERE account_id=? AND clinic_id=? AND language!=? AND status IN ('planned','copy_review','cancelled','failed') AND NOT EXISTS(SELECT 1 FROM json_each(frames_json) WHERE COALESCE(json_extract(value,'$.assetId'),'')!='') AND NOT EXISTS(SELECT 1 FROM v4_usage WHERE content_id=v4_content.id AND account_id=? AND status='published')",language,language,account,c.id,language,account);
+ }
  async function writeItem(account,item,{autoArtwork=false}={}){
   if(['briefing','writing','validating','generating'].includes(item.status))throw fail('Wait for the current task to finish or cancel it.');
   const c=await clinic(account,item.clinic_id);await Promise.all([styleFor(account,c,item),taskChoice(account,'writing'),taskChoice(account,'validation')]);
   if(item.week_id)await run("UPDATE v4_weeks SET status='writing' WHERE id=? AND account_id=?",item.week_id,account);
+  const language=c.profile.language||'English';
+  item={...item,language,brief:{...item.brief,language}};
   const context=contentContext(c,item),revision=item.revision+1;
-  const updated=await run("UPDATE v4_content SET status='writing',copy_status='draft',copy_approved_at=NULL,validation_json='{}',context_json=?,frames_json='[]',caption='',revision=? WHERE id=? AND account_id=? AND revision=?",JSON.stringify(context),revision,item.id,account,item.revision);if(!updated.meta.changes)throw fail('Content changed. Reload before writing.',409);
+  const updated=await run("UPDATE v4_content SET status='writing',copy_status='draft',copy_approved_at=NULL,validation_json='{}',context_json=?,language=?,brief_json=?,frames_json='[]',caption='',revision=? WHERE id=? AND account_id=? AND revision=?",JSON.stringify(context),language,JSON.stringify(item.brief),revision,item.id,account,item.revision);if(!updated.meta.changes)throw fail('Content changed. Reload before writing.',409);
   await job(account,c.id,'writing',{revision,clinic:c,corrections:item.validation?.issues||[],autoArtwork},{contentId:item.id,weekId:item.week_id,priority:item.position===0?0:1,key:`writing:${item.id}:${revision}`});
  }
  async function queueItem(account,item,priority=1){
@@ -158,6 +165,8 @@ export function createV4Service(platform){
   await updateWeek(account,item.week_id);
  }
  async function generateWeek(account,weekId,stage='all'){
+  const planned=await getWeek(account,weekId);
+  await syncDraftLanguages(account,await clinic(account,planned.week.clinic_id));
   const {week}=await getWeek(account,weekId);if(!week.items.length)throw fail('This week has no content.');
   if(week.items.some(i=>['briefing','writing','validating','generating'].includes(i.status)))throw fail('Wait for current tasks to finish.');
   if(!['brief','writing','images','all'].includes(stage))throw fail('Choose briefs, writing, images or full run.');
@@ -356,7 +365,8 @@ export function createV4Service(platform){
     const brand={...c.brand};for(const k of ['primary','accent'])if(/^#[0-9a-f]{6}$/i.test(input[k]||''))brand[k]=input[k];
     if(input.bookingUrl!==undefined){if(input.bookingUrl)publicUrl(input.bookingUrl);brand.bookingUrl=text(input.bookingUrl,500);}for(const key of ['phone','whatsapp','address'])if(input[key]!==undefined)brand[key]=text(input[key],key==='address'?500:50);if(input.website!==undefined){if(input.website)publicUrl(input.website);brand.website=text(input.website,500);}
     const selected=Boolean(c.styleSelection.primaryStyleId),status=profile.confirmed&&selected?'active':'onboarding';
-    await run('UPDATE v4_clinics SET name=?,profile_json=?,brand_json=?,status=?,revision=revision+1,updated_at=? WHERE account_id=? AND id=? AND revision=?',text(input.name||c.name,100),JSON.stringify(profile),JSON.stringify(brand),status,now(),account,c.id,c.revision);return json({clinic:await clinic(account,c.id)});
+    await run('UPDATE v4_clinics SET name=?,profile_json=?,brand_json=?,status=?,revision=revision+1,updated_at=? WHERE account_id=? AND id=? AND revision=?',text(input.name||c.name,100),JSON.stringify(profile),JSON.stringify(brand),status,now(),account,c.id,c.revision);
+    const savedClinic=await clinic(account,c.id);await syncDraftLanguages(account,savedClinic);return json({clinic:savedClinic});
    }
    if(parts[2]==='logo'&&method==='POST'){
     const bytes=new Uint8Array(await request.arrayBuffer()),mime=request.headers.get('content-type');if(!['image/png','image/jpeg','image/webp'].includes(mime)||bytes.length>2_000_000)throw fail('Choose a PNG, JPEG or WebP logo under 2 MB.');
@@ -425,10 +435,11 @@ export function createV4Service(platform){
    }
   }
   if(parts[0]==='content'&&parts[1]){
-   const item=await content(account,parts[1]),c=await clinic(account,item.clinic_id);
+   let item=await content(account,parts[1]);const c=await clinic(account,item.clinic_id);
    if(parts[2]==='postpilot'&&parts.length===3&&['GET','POST'].includes(method))return json(await postpilotRoute({platform:{...platform,postpilot:clinicId=>postpilot.connection(account,clinicId)},account,item,clinic:c,request}));
    if(parts.length===2&&method==='GET')return json(await getContent(account,item.id));
    if(parts[2]==='write'&&method==='POST'){
+    await syncDraftLanguages(account,c);item=await content(account,item.id);
     if(!item.brief.prepared){
      if(['briefing','writing','validating','generating'].includes(item.status))throw fail('Wait for the current task to finish or cancel it.');
      await taskChoice(account,'writing');await taskChoice(account,'validation');
@@ -471,8 +482,8 @@ export function createV4Service(platform){
     if(!['brief','writing','images'].includes(stage))throw fail('Choose a valid restart step.');
     await run("UPDATE v4_weeks SET status='planned',approved_at=NULL WHERE id=? AND account_id=?",item.week_id,account);
     if(stage==='brief'){
-     const revision=item.revision+1,brief={...item.brief,summary:''};
-     await run("UPDATE v4_content SET brief_json=?,frames_json='[]',caption='',copy_status='draft',validation_json='{}',context_json='{}',copy_approved_at=NULL,status='briefing',revision=? WHERE id=? AND account_id=?",JSON.stringify(brief),revision,item.id,account);
+     const revision=item.revision+1,language=c.profile.language||'English',brief={...item.brief,language,summary:''};
+     await run("UPDATE v4_content SET brief_json=?,language=?,frames_json='[]',caption='',copy_status='draft',validation_json='{}',context_json='{}',copy_approved_at=NULL,status='briefing',revision=? WHERE id=? AND account_id=?",JSON.stringify(brief),language,revision,item.id,account);
      await job(account,c.id,'brief',{revision,clinic:c,autoWrite:true},{contentId:item.id,weekId:item.week_id,key:`brief:${item.id}:${revision}`});
     }else if(stage==='writing')await writeItem(account,{...item,status:'planned'});
     else{

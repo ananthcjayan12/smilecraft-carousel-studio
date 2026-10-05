@@ -251,3 +251,30 @@ test('V4 a cancelled style regeneration keeps the previous artwork usable',async
  assert.equal((await f.call(`/clinics/${clinic.id}`)).styles.length,1);
  }finally{f.sqlite.close();}
  });
+
+test('changing clinic language resets unfinished weekly copy and prepares in the saved selection',async()=>{
+ const f=fixture();try{
+ const {clinic,week}=await f.setup();
+ await f.call(`/weeks/${week.id}/generate`,'POST',{stage:'writing'});await f.drain();
+ await f.call(`/clinics/${clinic.id}/profile`,'PUT',{revision:clinic.revision,language:'Malayalam + English',confirmed:true});
+ const updated=(await f.call(`/weeks/${week.id}`)).week;
+ assert.ok(updated.items.every(item=>item.language==='Malayalam + English'&&!item.brief.prepared&&item.copy_status==='draft'&&!item.frames.length));
+ await f.call(`/weeks/${week.id}/generate`,'POST',{stage:'writing'});await f.drain();
+ const rewritten=(await f.call(`/weeks/${week.id}`)).week;
+ assert.ok(rewritten.items.every(item=>item.language==='Malayalam + English'&&item.brief.language===item.language&&item.context.language===item.language&&item.copy_status==='validated'));
+ for(const input of f.textCalls.slice(-18))assert.match(input.prompt,/Malayalam \+ English/);
+ }finally{f.sqlite.close();}
+});
+
+test('completed artwork stays available after a language change and explicit rewrite uses the new language',async()=>{
+ const f=fixture();try{
+ const {clinic,week}=await f.setup();await f.call(`/weeks/${week.id}/generate`,'POST',{});await f.drain();
+ const before=(await f.call(`/weeks/${week.id}`)).week.items[0];
+ await f.call(`/clinics/${clinic.id}/profile`,'PUT',{revision:clinic.revision,language:'Malayalam + English',confirmed:true});
+ const saved=(await f.call(`/content/${before.id}`)).item;assert.deepEqual(saved.frames,before.frames);assert.equal(saved.language,'English');
+ await f.call(`/content/${before.id}/write`,'POST',{});await f.drain();
+ const rewritten=(await f.call(`/content/${before.id}`)).item;
+ assert.equal(rewritten.language,'Malayalam + English');assert.equal(rewritten.brief.language,rewritten.language);assert.equal(rewritten.context.language,rewritten.language);
+ assert.match(f.textCalls.at(-2).prompt,/Malayalam \+ English/);assert.ok(rewritten.frames.every(frame=>!frame.assetId));
+ }finally{f.sqlite.close();}
+});
