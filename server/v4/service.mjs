@@ -353,6 +353,17 @@ export function createV4Service(platform){
     const bytes=new Uint8Array(await request.arrayBuffer()),mime=request.headers.get('content-type');if(!['image/png','image/jpeg','image/webp'].includes(mime)||bytes.length>2_000_000)throw fail('Choose a PNG, JPEG or WebP logo under 2 MB.');
     const logoAssetId=await saveAsset(account,c.id,{bytes,mime});await run('UPDATE v4_clinics SET brand_json=?,revision=revision+1,updated_at=? WHERE account_id=? AND id=?',JSON.stringify({...c.brand,logoAssetId,...Object.fromEntries(['primary','accent'].map(k=>[k,request.headers.get('X-Logo-'+k)]).filter(([,v])=>/^#[0-9a-f]{6}$/i.test(v||'')))}),now(),account,c.id);return json({clinic:await clinic(account,c.id)});
    }
+   if(parts[2]==='styles'&&parts[3]==='upload'&&parts.length===4&&method==='POST'){
+    const mime=request.headers.get('content-type');
+    if(!['image/png','image/jpeg','image/webp'].includes(mime)||Number(request.headers.get('content-length'))>10_000_000)throw fail('Choose a PNG, JPEG or WebP style image under 10 MB.');
+    const bytes=new Uint8Array(await request.arrayBuffer());
+    const valid=mime==='image/png'?bytes[0]===137&&bytes[1]===80&&bytes[2]===78&&bytes[3]===71&&bytes[4]===13&&bytes[5]===10&&bytes[6]===26&&bytes[7]===10:mime==='image/jpeg'?bytes[0]===255&&bytes[1]===216&&bytes[2]===255:String.fromCharCode(...bytes.slice(0,4))==='RIFF'&&String.fromCharCode(...bytes.slice(8,12))==='WEBP';
+    if(!bytes.length||bytes.length>10_000_000||!valid)throw fail('Choose a valid PNG, JPEG or WebP style image under 10 MB.');
+    const name=text(new URL(request.url).searchParams.get('name'),100)||'Custom clinic style',styleId=id();
+    const assetId=await saveAsset(account,c.id,{bytes,mime});
+    await run("INSERT INTO v4_styles(id,account_id,clinic_id,reference_id,name,asset_id,status,created_at) VALUES(?,?,?,?,?,?,'ready',?)",styleId,account,c.id,`upload:${styleId}`,name,assetId,now());
+    return json({styleId,styles:await styles(account,c.id)});
+   }
    if(parts[2]==='styles'&&parts[3]==='cancel'&&method==='POST')return json(await cancelJobs(account,c.id));
    if(parts[2]==='styles'&&parts[3]&&parts[4]==='regenerate'&&method==='POST'){await platform.requireActivation(account);const input=await body();return json(await regenerateStyle(account,c,parts[3],text(input.notes,400)));}
    if(parts[2]==='styles'&&method==='POST'){await platform.requireActivation(account);return json(await generateStyles(account,c.id));}

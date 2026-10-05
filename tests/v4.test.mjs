@@ -236,3 +236,18 @@ test('V4 a cancelled style regeneration keeps the previous artwork usable',async
  f.sqlite.prepare("UPDATE v4_styles SET status='generating' WHERE id=?").run(target.id);const job=f.sqlite.prepare("SELECT id FROM v4_jobs WHERE kind='style' AND json_extract(input_json,'$.styleId')=?").get(target.id);
  await f.call(`/clinics/${clinic.id}/styles/cancel`,'POST',{});f.sqlite.prepare("UPDATE v4_jobs SET status='queued' WHERE id=?").run(job.id);f.sqlite.prepare("UPDATE v4_styles SET status='generating' WHERE id=?").run(target.id);
  await f.call(`/clinics/${clinic.id}/styles/cancel`,'POST',{});const after=(await f.call(`/clinics/${clinic.id}`)).styles.find(s=>s.id===target.id);assert.equal(after.status,'ready');assert.equal(after.asset_id,target.asset_id);f.sqlite.close()});
+
+ test('Custom style uploads are ready without generation and enforce ownership and image validation',async()=>{
+ const f=fixture();try{
+ const {clinic}=await f.call('/clinics','POST',{name:'Custom Dental'});f.setActive(false);
+ const bytes=new Uint8Array([137,80,78,71,13,10,26,10,0]);
+ const upload=async(body=bytes,mime='image/png',account='A')=>{const url=new URL(`https://studio.test/api/v4/clinics/${clinic.id}/styles/upload?name=Existing%20design`);return f.service.route(new Request(url,{method:'POST',body,headers:{'Content-Type':mime}}),account,url)};
+ const result=await (await upload()).json();assert.equal(result.styles.length,1);const style=result.styles[0];assert.equal(style.name,'Existing design');assert.equal(style.status,'ready');assert.ok(style.asset_id);assert.equal(f.queued.length,0);
+ await f.call(`/clinics/${clinic.id}/style-selection`,'PUT',{primaryStyleId:style.id});assert.equal((await f.call(`/clinics/${clinic.id}`)).clinic.styleSelection.primaryStyleId,style.id);
+ await assert.rejects(upload(bytes,'image/png','B'),/Clinic not found/);
+ await assert.rejects(upload(new Uint8Array([1,2,3])),/valid PNG/);
+ await assert.rejects(upload(bytes,'image/svg+xml'),/PNG, JPEG/);
+ await assert.rejects(upload(new Uint8Array(10_000_001)),/valid PNG/);
+ assert.equal((await f.call(`/clinics/${clinic.id}`)).styles.length,1);
+ }finally{f.sqlite.close();}
+ });
