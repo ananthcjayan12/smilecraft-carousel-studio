@@ -326,7 +326,7 @@ export function createV4Service(platform){
     for(const task of Object.keys(TASKS)){
      const choice=input.tasks?.[task],entry=catalog[choice?.provider],kind=['style','artwork'].includes(task)?'models':'writingModels';
      if(!entry?.available||!entry[kind]?.some(([id])=>id===choice.model))throw fail(`Choose an available provider and supported model for ${TASKS[task]}.`);
-     tasks[task]={provider:choice.provider,model:choice.model,...(['style','artwork'].includes(task)?normalizeImageOptions(choice):{})};
+     tasks[task]={provider:choice.provider,model:choice.model,...(['style','artwork'].includes(task)?normalizeImageOptions(choice,entry):{})};
     }
     await run('INSERT INTO v4_provider_settings(account_id,tasks_json,updated_at) VALUES(?,?,?) ON CONFLICT(account_id) DO UPDATE SET tasks_json=excluded.tasks_json,revision=revision+1,updated_at=excluded.updated_at',platform.providerSettingsAccount||account,JSON.stringify(tasks),now());return json(await providerSettings(account));
    }

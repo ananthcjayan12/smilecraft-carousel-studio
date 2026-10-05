@@ -167,8 +167,9 @@ export function checkDraft(item, template) {
   return "";
 }
 
-const LOGO_RULES = (name) =>
-  `LOGO: The separately supplied logo image is ${name}'s real logo. Keep its exact shape, letterforms and proportions; never redraw, re-letter or invent a logo, and never use a logo from a reference image. Any plain box behind it in the file is only the upload canvas: set the mark directly on the layout, in its own colours where they contrast, otherwise as a single-colour version in the brand colour, dark ink or white. Keep it small with clear space. If no logo image is supplied, write the brand name in small neat type instead.`;
+const LOGO_RULES = (name, hasLogo) => hasLogo
+  ? `MANDATORY LOGO PRESERVATION: The LAST supplied image is ${name}'s authentic logo and the sole authority for brand identity. Place this exact supplied logo on EVERY frame or panel, including the cover and final CTA. Preserve ALL lettering, spelling, letter arrangement, symbols, shapes, original colours, aspect ratio and proportions. Treat it as a finished image asset: only scale it uniformly and position it. Never redraw, retype, simplify, stylise, recolour, stretch, crop, rotate, add effects or replace it with a typed brand name. Never use a logo from the style board or an earlier generated image, even if it looks similar. Do not remove any background that is part of the supplied logo. Choose a quiet, contrasting area or a neutral backing so the original logo remains readable; adapt the surrounding artwork instead of altering the logo. Keep the entire logo visible, sharp, with clear space and consistent size and placement across frames. These identity rules take precedence over art direction, brand palette, visual concepts and requested edits. Before returning the image, verify the supplied logo is present and its lettering, symbols, colours and proportions match the original.`
+  : `LOGO: No separate authentic logo image is supplied. Write ${JSON.stringify(name)} in small neat type in a consistent position. Do not invent a logo or copy one from a reference board.`;
 
 export function artworkPrompt(brand, item, frame, { template, style, hasLogo, note = "" }) {
   const last = frame.position === item.frames.length,
@@ -193,14 +194,14 @@ export function artworkPrompt(brand, item, frame, { template, style, hasLogo, no
       ? "Leave an empty rounded area in the lower-middle for an Instagram sticker. Do not draw the sticker."
       : "",
     note ? `REQUESTED CHANGE for this frame: ${note}` : "",
-    LOGO_RULES(brand.name),
+    LOGO_RULES(brand.name, hasLogo),
     "No invented statistics, testimonials, prices, real patients, before/after photos, QR codes, watermarks or extra logos. Illustrations or abstract imagery are preferred over photos of people.",
   ]
     .filter(Boolean)
     .join("\n");
 }
 
-export function stylePrompt(brand, reference, { notes = "", revising = false, uploaded = false } = {}) {
+export function stylePrompt(brand, reference, { notes = "", revising = false, uploaded = false, hasLogo = false } = {}) {
   return [
     `Act as a senior brand designer. Create one ORIGINAL 4:3 landscape design-system board containing exactly five separate 4:5 Instagram templates in one horizontal row for ${JSON.stringify(brand.name)}.`,
     `${brand.name}: ${brand.profile?.product || "a brand on Instagram"} Audience: ${brand.profile?.audience || ""}`,
@@ -210,7 +211,7 @@ export function stylePrompt(brand, reference, { notes = "", revising = false, up
     `BRAND COLOURS: primary ${brand.brand?.primary}, accent ${brand.brand?.accent}. Voice: ${brand.profile?.voice || ""}`,
     "Panels: 1) bold hook, 2) tip or list, 3) product or proof, 4) steps or process, 5) a big “Comment KEYWORD” call to action. Use short neutral placeholder labels such as “Headline”, “Key point” and “Comment KEYWORD”; no invented claims, prices or numbers. English only.",
     brand.profile?.mascot ? `A small illustrated mascot (${brand.profile.mascot}) may appear on one or two panels.` : "",
-    LOGO_RULES(brand.name) + " Use one consistent logo position on every panel.",
+    LOGO_RULES(brand.name, hasLogo) + " Use one consistent logo position on every panel.",
     revising
       ? "The last supplied board before the logo is the current version of this style: revise it rather than starting over."
       : "",

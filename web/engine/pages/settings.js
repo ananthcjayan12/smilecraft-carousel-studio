@@ -7,7 +7,7 @@ const TASKS = { writing: "Content writing", validation: "Copy validation", style
 const kindOf = (task) => (["style", "artwork"].includes(task) ? "models" : "writingModels");
 let config = null;
 function output(task, selected) {
-  const option = imageOptions(selected.provider, selected.model);
+  const option = imageOptions(selected.provider, selected.model, config.providers[selected.provider]);
   return option
     ? `<label class="field">${option.label}<select name="${task}-${option.key}">${option.values.map((v) => `<option value="${v}" ${(selected[option.key] || option.defaultValue) === v ? "selected" : ""}>${v}</option>`).join("")}</select></label>`
     : "";
@@ -59,7 +59,7 @@ export async function submit(name, data) {
       {
         provider: data.get(`${task}-provider`),
         model: data.get(`${task}-model`),
-        ...Object.fromEntries(["quality", "imageSize"].filter((k) => data.has(`${task}-${k}`)).map((k) => [k, data.get(`${task}-${k}`)])),
+        ...Object.fromEntries(["quality", "imageSize", "reasoningEffort"].filter((k) => data.has(`${task}-${k}`)).map((k) => [k, data.get(`${task}-${k}`)])),
       },
     ]),
   );

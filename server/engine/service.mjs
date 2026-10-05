@@ -699,6 +699,7 @@ export function createEngineService(platform) {
           : await platform.designReference(style.reference_id);
         if (!base) throw fail("The style reference is unavailable.");
         const current = input.revise && style.asset_id ? await assetImage(account, style.asset_id) : null;
+        const logo = await assetImage(account, b.brand.logoAssetId);
         const image = await platform.renderImage({
           account,
           kind: "style",
@@ -707,9 +708,10 @@ export function createEngineService(platform) {
             notes: input.notes || style.notes || "",
             revising: Boolean(current),
             uploaded,
+            hasLogo: Boolean(logo),
           }),
           references: [base, current].filter(Boolean),
-          logo: await assetImage(account, b.brand.logoAssetId),
+          logo,
           ratio: "4:3",
           signal: controller.signal,
           jobId: row.id,

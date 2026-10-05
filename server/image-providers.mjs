@@ -1,4 +1,4 @@
-import {normalizeImageOptions} from '../web/image-options.js';
+import {normalizeImageOptions,codexImageModelArgs} from '../web/image-options.js';
 import { AsyncLocalStorage } from 'node:async_hooks';
 const generationContext = new AsyncLocalStorage();
 import { styleVariantInstructions } from '../web/style-variant.js';
@@ -198,7 +198,7 @@ async function writeReferenceFiles(work, reference, logo, master) {
   return { referencePath, logoPath, masterPath, extraPaths };
 }
 
-async function codexImage(prompt, reference, logo, requestedModel, master, format = 'slide', aspectRatio = '4:5') {
+async function codexImage(prompt, reference, logo, requestedModel, master, format = 'slide', aspectRatio = '4:5', options = {}) {
   const work = await mkdtemp(path.join(tmpdir(), 'smilecraft-image-'));
   try {
     const { referencePath, logoPath, masterPath, extraPaths } = await writeReferenceFiles(work, reference, logo, master);
@@ -208,7 +208,7 @@ async function codexImage(prompt, reference, logo, requestedModel, master, forma
     const model = limit(requestedModel, 100).trim();
     const env = { ...process.env, CI: '1' }; delete env.OPENAI_API_KEY; delete env.CODEX_API_KEY;
     const images = [referencePath, ...extraPaths, ...(masterPath ? [masterPath] : []), ...(logoPath ? [logoPath] : [])];
-    await runProcess(process.env.CODEX_BIN || 'codex', ['exec', '--ephemeral', ...(model && model !== 'imagegen' ? ['--model', model] : []), '--sandbox', 'workspace-write', '--image', ...images, '--', instruction], { cwd: work, env }, 900000);
+    await runProcess(process.env.CODEX_BIN || 'codex', ['exec', '--ephemeral', ...codexImageModelArgs(model,options.reasoningEffort), '--sandbox', 'workspace-write', '--image', ...images, '--', instruction], { cwd: work, env }, 900000);
     const generated = await stat(outputPath).catch(() => null);
     if (!generated?.isFile() || generated.size < 10_000) throw new Error('Codex completed without creating a usable final-slide.png. Check Codex login and built-in image generation availability.');
     return bufferDataUrl(await readFile(outputPath));
@@ -256,7 +256,7 @@ export async function generateSlideImage(data) {
     let image;
     if (data.provider === 'openai') image = await openaiImage(prompt, reference, logo, data.model, master, 'slide', data.aspectRatio, data);
     else if (data.provider === 'gemini') image = await geminiImage(prompt, reference, logo, data.model, master, 'slide', data.aspectRatio, data);
-    else if (data.provider === 'codex') image = await codexImage(prompt, reference, logo, data.model, master, 'slide', data.aspectRatio);
+    else if (data.provider === 'codex') image = await codexImage(prompt, reference, logo, data.model, master, 'slide', data.aspectRatio, data);
     else if (data.provider === 'antigravity') image = await antigravityImage(prompt, reference, logo, data.model, master, 'slide', data.aspectRatio);
     else throw Object.assign(new Error('Choose a supported image provider.'), { status: 400 });
     await writeImageLog(data.workDir, { timestamp: new Date().toISOString(), provider: data.provider, model: data.model || '(provider default)', slideNumber: data.slideNumber, status: 'success', durationMs: Date.now() - started });
@@ -293,11 +293,11 @@ Keep all five cards fully visible, evenly separated, straight-on, and easy to cr
 }
 
 // V4 supplies its own dental/language prompt and the full reference set.
-export async function generateReferenceImage({provider, model, agyModel, prompt, referenceImages, logoImage, signal, quality, imageSize}) {
+export async function generateReferenceImage({provider, model, agyModel, prompt, referenceImages, logoImage, signal, quality, imageSize, reasoningEffort}) {
   const [reference, ...references] = referenceImages.map(value=>parseDataUrl(value,'Design reference'));
   const logo=logoImage?parseDataUrl(logoImage,'Clinic logo'):null;
   const generate={openai:openaiImage,gemini:geminiImage,codex:codexImage,antigravity:antigravityImage}[provider];
   if(!generate)throw new Error('Unsupported image provider.');
-  return generationContext.run({references,signal,agyModel},()=>{signal?.throwIfAborted();return generate(prompt,reference,logo,compatibleModel(provider,model,'image'),null,'board','4:5',{quality,imageSize});});
+  return generationContext.run({references,signal,agyModel},()=>{signal?.throwIfAborted();return generate(prompt,reference,logo,compatibleModel(provider,model,'image'),null,'board','4:5',{quality,imageSize,reasoningEffort});});
 }
 export const withImageCancellation=(signal,work,{agyModel}={})=>generationContext.run({signal,agyModel},work);
