@@ -380,3 +380,44 @@ test('weekly format changes retain the topic, reset generated content and produc
  assert.equal(changed.frames.length,1);assert.equal(changed.copy_status,'validated');
  }finally{f.sqlite.close();}
 });
+
+test('reset prepares a fresh weekly draft with current provider settings and cleared old content',async()=>{
+ const f=fixture();try{
+ const {week}=await f.setup();await f.call(`/weeks/${week.id}/generate`,'POST',{});await f.drain();
+ const item=(await f.call(`/weeks/${week.id}`)).week.items[0];
+ const config=await f.call('/providers');config.tasks.writing={provider:'openai',model:'writer-b'};await f.call('/providers','PUT',{tasks:config.tasks});
+ await assert.rejects(f.call(`/content/${item.id}/reset`,'POST',{revision:item.revision-1}),/Content changed/);
+ const reset=(await f.call(`/content/${item.id}/reset`,'POST',{revision:item.revision})).item;
+ assert.equal(reset.id,item.id);assert.equal(reset.type,item.type);assert.equal(reset.knowledge_card_id,item.knowledge_card_id);
+ assert.deepEqual(reset.frames,[]);assert.equal(reset.caption,'');assert.equal(reset.copy_status,'draft');assert.deepEqual(reset.context,{});assert.equal(reset.brief.prepared,false);
+ await assert.rejects(f.call(`/content/${item.id}/reset`,'POST',{revision:reset.revision}),/current tasks/);
+ await f.drain();const fresh=(await f.call(`/content/${item.id}`)).item;
+ assert.equal(fresh.copy_status,'validated');assert.equal(fresh.frames.length,5);assert.ok(fresh.frames.every(frame=>!frame.assetId));
+ assert.equal(f.textCalls.filter(call=>call.schema.properties.frames).at(-1).generation.model,'writer-b');
+ }finally{f.sqlite.close();}
+});
+
+test('standalone reset preserves custom instructions and explicit contact selection',async()=>{
+ const f=fixture();try{
+ const {clinic}=await f.setup();const item=(await f.call(`/clinics/${clinic.id}/content`,'POST',{type:'post',topic:'Opening hours',customBrief:'Contact the clinic for current hours.',contactKeys:[]})).item;
+ await f.drain();const draft=(await f.call(`/content/${item.id}`)).item;
+ await f.call(`/content/${item.id}/reset`,'POST',{revision:draft.revision});await f.drain();
+ const fresh=(await f.call(`/content/${item.id}`)).item;
+ assert.equal(fresh.brief.sourceSummary,'Contact the clinic for current hours.');assert.deepEqual(fresh.brief.contactKeys,[]);assert.equal(fresh.frames.length,1);assert.equal(fresh.copy_status,'validated');
+ }finally{f.sqlite.close();}
+});
+
+test('clinic removal cancels generation, removes its data and preserves other clinics',async()=>{
+ const f=fixture();try{
+ f.sqlite.pragma('foreign_keys = ON');
+ const {clinic,week}=await f.setup();
+ const other=(await f.call('/clinics','POST',{name:'Keep this clinic'})).clinic;
+ await assert.rejects(f.call(`/clinics/${clinic.id}`,'DELETE',undefined,'B'),/Clinic not found/);
+ await f.call(`/weeks/${week.id}/generate`,'POST',{stage:'all'});
+ await f.call(`/clinics/${clinic.id}`,'DELETE');await f.drain();
+ await assert.rejects(f.call(`/clinics/${clinic.id}`),/Clinic not found/);
+ for(const table of ['v4_content','v4_weeks','v4_styles','v4_assets','v4_jobs','v4_usage'])assert.equal(f.sqlite.prepare(`SELECT count(*) n FROM ${table} WHERE clinic_id=?`).get(clinic.id).n,0);
+ assert.equal((await f.call(`/clinics/${other.id}`)).clinic.name,'Keep this clinic');
+ assert.deepEqual((await f.call('/bootstrap')).clinics.map(c=>c.id),[other.id]);
+ }finally{f.sqlite.close();}
+});

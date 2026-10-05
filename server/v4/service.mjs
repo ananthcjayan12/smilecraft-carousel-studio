@@ -371,6 +371,18 @@ export function createV4Service(platform){
   }
   if(parts[0]==='clinics'&&parts[1]){
    const c=await clinic(account,parts[1]);
+   if(parts.length===2&&method==='DELETE'){
+    const cancelled=await all("UPDATE v4_jobs SET status='cancelled',error='Clinic removed.',finished_at=? WHERE account_id=? AND clinic_id=? AND status IN ('queued','running') RETURNING id",now(),account,c.id);
+    for(const j of cancelled)controllers.get(j.id)?.abort();
+    const tables=new Set((await all("SELECT name FROM sqlite_master WHERE type='table'")).map(t=>t.name));
+    const deletes=[];
+    if(tables.has('v4_postpilot'))deletes.push(db.prepare('DELETE FROM v4_postpilot WHERE account_id=? AND content_id IN (SELECT id FROM v4_content WHERE account_id=? AND clinic_id=?)').bind(account,account,c.id));
+    if(tables.has('v4_postpilot_connections'))deletes.push(db.prepare('DELETE FROM v4_postpilot_connections WHERE account_id=? AND clinic_id=?').bind(account,c.id));
+    for(const table of ['v4_jobs','v4_usage','v4_content','v4_weeks','v4_styles','v4_assets'])deletes.push(db.prepare(`DELETE FROM ${table} WHERE account_id=? AND clinic_id=?`).bind(account,c.id));
+    deletes.push(db.prepare('DELETE FROM v4_clinics WHERE account_id=? AND id=?').bind(account,c.id));
+    if(db.batch)await db.batch(deletes);else for(const statement of deletes)await statement.run();
+    return json({ok:true});
+   }
    if(parts[2]==='postpilot-connection'){
     if(parts.length===3&&method==='GET')return json(await postpilot.read(account,c.id));
     if(parts.length===3&&method==='PUT')return json(await postpilot.save(account,c.id,await body()));
@@ -497,6 +509,25 @@ export function createV4Service(platform){
     const jobs=await all("SELECT id FROM v4_jobs WHERE account_id=? AND content_id=? AND status IN ('queued','running','failed','cancelled')",account,item.id);
     for(const j of jobs){await run("UPDATE v4_jobs SET status='cancelled',request_key=request_key||':cancelled:'||id,error='Content skipped.',finished_at=? WHERE id=?",now(),j.id);controllers.get(j.id)?.abort();}
     await run("UPDATE v4_content SET status='skipped' WHERE id=? AND account_id=?",item.id,account);await updateWeek(account,item.week_id);return json(await content(account,item.id));
+   }
+   if(parts[2]==='reset'&&method==='POST'){
+    const input=await body();if(Number(input.revision)!==item.revision)throw fail('Content changed. Reload before resetting.',409);
+    if(item.published)throw fail('Published content cannot be reset.');
+    const active=await first("SELECT id FROM v4_jobs WHERE account_id=? AND (content_id=? OR week_id=? AND content_id IS NULL) AND status IN ('queued','running')",account,item.id,item.week_id);
+    if(active||['briefing','writing','validating','generating'].includes(item.status))throw fail('Stop or wait for current tasks before resetting the draft.');
+    await platform.requireActivation(account);
+    const styleId=currentStyle(c,item);await styleFor(account,c,{style_id:styleId});await taskChoice(account,'writing');await taskChoice(account,'validation');
+    const card=cardById(item.knowledge_card_id),angle=card?.engagementAngles.find(a=>a.id===item.angle_id);
+    const brief=sourceBrief(card,angle,c,card?{}:{topic:item.brief.sourceTopic||item.topic,customBrief:item.brief.sourceSummary||''});
+    brief.styleMode=item.brief.styleMode||'clinic';brief.contactMode=item.brief.contactMode||'clinic';
+    if(brief.contactMode==='custom')brief.contactKeys=item.brief.contactKeys;
+    const revision=item.revision+1;
+    const saved=await run("UPDATE v4_content SET topic=?,brief_json=?,style_id=?,language=?,frames_json='[]',caption='',copy_status='draft',validation_json='{}',context_json='{}',copy_approved_at=NULL,status='briefing',revision=? WHERE id=? AND account_id=? AND revision=?",brief.topic,JSON.stringify(brief),styleId,c.profile.language||'English',revision,item.id,account,item.revision);
+    if(!saved.meta.changes)throw fail('Content changed. Reload before resetting.',409);
+    await run("UPDATE v4_jobs SET status='cancelled',request_key=request_key||':reset:'||id,error='Draft reset.',finished_at=? WHERE account_id=? AND content_id=? AND status IN ('failed','cancelled')",now(),account,item.id);
+    if(item.week_id)await run("UPDATE v4_weeks SET status='planned',approved_at=NULL WHERE id=? AND account_id=?",item.week_id,account);
+    await job(account,c.id,'brief',{revision,clinic:c,autoWrite:true},{contentId:item.id,weekId:item.week_id,key:`brief:${item.id}:${revision}`});
+    return json(await getContent(account,item.id));
    }
    if(parts[2]==='type'&&method==='PUT'){
     const input=await body();
