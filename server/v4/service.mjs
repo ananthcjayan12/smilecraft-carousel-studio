@@ -498,6 +498,21 @@ export function createV4Service(platform){
     for(const j of jobs){await run("UPDATE v4_jobs SET status='cancelled',request_key=request_key||':cancelled:'||id,error='Content skipped.',finished_at=? WHERE id=?",now(),j.id);controllers.get(j.id)?.abort();}
     await run("UPDATE v4_content SET status='skipped' WHERE id=? AND account_id=?",item.id,account);await updateWeek(account,item.week_id);return json(await content(account,item.id));
    }
+   if(parts[2]==='type'&&method==='PUT'){
+    const input=await body();
+    if(!item.week_id)throw fail('Only weekly content can change format.');
+    if(!['carousel','post','story'].includes(input.type))throw fail('Choose a valid content type.');
+    if(Number(input.revision)!==item.revision)throw fail('Content changed. Reload before editing.',409);
+    const active=await first("SELECT id FROM v4_jobs WHERE account_id=? AND (content_id=? OR week_id=? AND content_id IS NULL) AND status IN ('queued','running')",account,item.id,item.week_id);
+    if(active)throw fail('Stop or wait for current tasks before changing content type.');
+    if(item.published)throw fail('Published content cannot change format.');
+    if(input.type===item.type)return json(await getContent(account,item.id));
+    const saved=await run("UPDATE v4_content SET type=?,recipe_id=?,caption='',frames_json='[]',copy_status='draft',validation_json='{}',context_json='{}',copy_approved_at=NULL,status='planned',revision=revision+1 WHERE id=? AND account_id=? AND revision=?",input.type,`${input.type}:${item.brief.angle}`,item.id,account,item.revision);
+    if(!saved.meta.changes)throw fail('Content changed. Reload before editing.',409);
+    await run("UPDATE v4_usage SET recipe_id=?,status='planned' WHERE content_id=? AND account_id=? AND status!='published'",`${input.type}:${item.brief.angle}`,item.id,account);
+    await run("UPDATE v4_weeks SET status='planned',approved_at=NULL WHERE id=? AND account_id=?",item.week_id,account);
+    return json(await getContent(account,item.id));
+   }
    if(parts[2]==='restart'&&method==='POST'){
     if(!item.week_id)throw fail('Only weekly content can be restarted.');
     if(['briefing','writing','validating','generating'].includes(item.status))throw fail('Stop the current task before restarting this item.');

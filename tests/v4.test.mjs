@@ -363,3 +363,20 @@ test('settings changes refresh artwork drafts while keeping approved publication
  assert.ok(updated.slice(1).every(item=>item.status==='planned'&&item.frames.length===0&&item.copy_status==='draft'));
  }finally{f.sqlite.close();}
 });
+
+
+test('weekly format changes retain the topic, reset generated content and produce the correct frame count',async()=>{
+ const f=fixture();try{
+ const {week}=await f.setup();await f.call(`/weeks/${week.id}/generate`,'POST',{});await f.drain();
+ const item=(await f.call(`/weeks/${week.id}`)).week.items.find(i=>i.type==='carousel');
+ await assert.rejects(f.call(`/content/${item.id}/type`,'PUT',{type:'video',revision:item.revision}),/valid content type/);
+ await assert.rejects(f.call(`/content/${item.id}/type`,'PUT',{type:'story',revision:item.revision-1}),/Content changed/);
+ await f.call(`/content/${item.id}/type`,'PUT',{type:'story',revision:item.revision});
+ let changed=(await f.call(`/weeks/${week.id}`)).week.items.find(i=>i.id===item.id);
+ assert.equal(changed.type,'story');assert.equal(changed.topic,item.topic);assert.equal(changed.knowledge_card_id,item.knowledge_card_id);
+ assert.deepEqual(changed.frames,[]);assert.equal(changed.caption,'');assert.equal(changed.copy_status,'draft');assert.equal(changed.status,'planned');
+ await f.call(`/content/${item.id}/restart`,'POST',{stage:'writing'});await f.drain();
+ changed=(await f.call(`/weeks/${week.id}`)).week.items.find(i=>i.id===item.id);
+ assert.equal(changed.frames.length,1);assert.equal(changed.copy_status,'validated');
+ }finally{f.sqlite.close();}
+});
