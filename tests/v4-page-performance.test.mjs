@@ -7,7 +7,7 @@ const apiUrl=moduleUrl(`export const calls=[];let revision=0;export const apiCac
 const appUrl=moduleUrl('export const go=()=>{},toast=()=>{},refreshWeek=()=>{},refreshClinic=()=>{};');
 const uiUrl=new URL('../web/v4/ui.js',import.meta.url).href;
 const base=new URL('../web/v4/pages/review.js',import.meta.url);
-const reviewSource=(await readFile(base,'utf8')).replace("'../api.js'",JSON.stringify(apiUrl)).replace("'../app.js'",JSON.stringify(appUrl)).replace("'../ui.js'",JSON.stringify(uiUrl)).replace("'../content-form.js'",JSON.stringify(new URL('../content-form.js',base).href));
+const reviewSource=(await readFile(base,'utf8')).replace("'../postpilot.js'",JSON.stringify(new URL('../postpilot.js',base).href)).replace("'../api.js'",JSON.stringify(apiUrl)).replace("'../app.js'",JSON.stringify(appUrl)).replace("'../ui.js'",JSON.stringify(uiUrl)).replace("'../content-form.js'",JSON.stringify(new URL('../content-form.js',base).href));
 const review=await import(moduleUrl(reviewSource)),api=await import(apiUrl);
 const state={clinic:{id:'clinic',name:'Test clinic',profile:{},brand:{}},frame:0,styles:[],bootstrap:{clinics:[]}};
 test('review slide navigation stays local until data changes',async()=>{

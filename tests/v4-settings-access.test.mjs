@@ -20,3 +20,9 @@ test('admin dashboard exposes global models, client balances, and allocation con
  assert.deepEqual(mock.calls,['/providers','/api/admin/accounts','/api/plans']);
  assert.match(shell(admin,'/admin',html),/Admin dashboard/);
 });
+
+test('PostPilot Settings offers connection controls without prefilling secrets',()=>{
+ const clinic={id:'clinic',name:'Test Clinic'};
+ const disconnected=settings.postpilotForm(clinic,{configured:false});assert.match(disconnected,/data-form="postpilot-connection"/);assert.match(disconnected,/type="password"/);assert.match(disconnected,/Connect PostPilot/);
+ const connected=settings.postpilotForm(clinic,{configured:true,baseUrl:'https://postpilot.ananth-c-jayan.workers.dev',apiKey:'ppk_secret',account:{username:'clinic_instagram'}});assert.match(connected,/Check connection/);assert.match(connected,/Disconnect/);assert.match(connected,/clinic_instagram/);assert.doesNotMatch(connected,/ppk_secret/);
+});

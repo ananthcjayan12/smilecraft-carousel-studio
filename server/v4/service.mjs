@@ -1,3 +1,5 @@
+import {postpilotSettings} from './postpilot-settings.mjs';
+import {postpilotRoute} from './postpilot-route.mjs';
 import {clinicPlan} from '../../web/v4/plan.js';
 import {normalizeImageOptions} from '../../web/image-options.js';
 import {STYLE_REFERENCES} from './image-prompts.mjs';
@@ -27,6 +29,7 @@ const viewContent=r=>{
 export function weekStart(value=new Date()) {const d=new Date(value);if(Number.isNaN(d.getTime()))throw fail('Choose a valid week.');d.setUTCHours(0,0,0,0);d.setUTCDate(d.getUTCDate()-((d.getUTCDay()+6)%7));return d.toISOString().slice(0,10);}
 export function createV4Service(platform){
  const controllers=new Map();
+ const postpilot=postpilotSettings(platform.db,{fetcher:platform.postpilotFetch});
  const db=platform.db, first=(sql,...args)=>db.prepare(sql).bind(...args).first(), all=async(sql,...args)=>(await db.prepare(sql).bind(...args).all()).results;
  const run=(sql,...args)=>db.prepare(sql).bind(...args).run();
  const write=(sql,args,planning)=>planning?.writes?planning.writes.push(db.prepare(sql).bind(...args)):run(sql,...args);
@@ -340,6 +343,12 @@ export function createV4Service(platform){
   }
   if(parts[0]==='clinics'&&parts[1]){
    const c=await clinic(account,parts[1]);
+   if(parts[2]==='postpilot-connection'){
+    if(parts.length===3&&method==='GET')return json(await postpilot.read(account,c.id));
+    if(parts.length===3&&method==='PUT')return json(await postpilot.save(account,c.id,await body()));
+    if(parts.length===3&&method==='DELETE')return json(await postpilot.remove(account,c.id));
+    if(parts[3]==='check'&&parts.length===4&&method==='POST')return json(await postpilot.check(account,c.id));
+   }
    if(parts.length===2&&method==='GET'){const [available,jobs]=await Promise.all([styles(account,c.id),clinicJobs(account,c.id)]);return json({clinic:c,styles:available,jobs});}
    if(parts[2]==='profile'&&method==='PUT'){
     const input=await body();if(Number(input.revision)!==c.revision)throw fail('Clinic details changed. Reload before saving.',409);
@@ -417,6 +426,7 @@ export function createV4Service(platform){
   }
   if(parts[0]==='content'&&parts[1]){
    const item=await content(account,parts[1]),c=await clinic(account,item.clinic_id);
+   if(parts[2]==='postpilot'&&parts.length===3&&['GET','POST'].includes(method))return json(await postpilotRoute({platform:{...platform,postpilot:clinicId=>postpilot.connection(account,clinicId)},account,item,clinic:c,request}));
    if(parts.length===2&&method==='GET')return json(await getContent(account,item.id));
    if(parts[2]==='write'&&method==='POST'){
     if(!item.brief.prepared){
