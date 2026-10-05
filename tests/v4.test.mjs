@@ -60,7 +60,7 @@ test('Validation failures stop weekly artwork, and changed clinic contacts inval
  await assert.rejects(f.call(`/content/${rejected.items[0].id}/approve-copy`,'POST',{}),/Validate the draft/);
  f.rejectValidation(false);const {item}=await f.call(`/clinics/${clinic.id}/content`,'POST',{type:'story',customBrief:'Our clinic welcomes new patients.'});await f.drain();await f.call(`/content/${item.id}/write`,'POST',{});await f.drain();
  const latest=(await f.call(`/clinics/${clinic.id}`)).clinic;await f.call(`/clinics/${clinic.id}/profile`,'PUT',{revision:latest.revision,phone:'+91 9999999999',confirmed:true});
- await assert.rejects(f.call(`/content/${item.id}/approve-copy`,'POST',{}),/Clinic details or language changed/);
+ await assert.rejects(f.call(`/content/${item.id}/approve-copy`,'POST',{}),/Validate the draft/);
  f.sqlite.close();
 });
 
@@ -276,5 +276,76 @@ test('completed artwork stays available after a language change and explicit rew
  const rewritten=(await f.call(`/content/${before.id}`)).item;
  assert.equal(rewritten.language,'Malayalam + English');assert.equal(rewritten.brief.language,rewritten.language);assert.equal(rewritten.context.language,rewritten.language);
  assert.match(f.textCalls.at(-2).prompt,/Malayalam \+ English/);assert.ok(rewritten.frames.every(frame=>!frame.assetId));
+ }finally{f.sqlite.close();}
+});
+
+test('changing selected styles refreshes unfinished drafts and rewrites against the new template',async()=>{
+ const f=fixture();try{
+ const {clinic,week}=await f.setup();await f.call(`/weeks/${week.id}/generate`,'POST',{stage:'writing'});await f.drain();
+ const styles=(await f.call(`/clinics/${clinic.id}`)).styles,newStyle=styles.find(s=>s.id!==clinic.styleSelection.primaryStyleId&&!clinic.styleSelection.secondaryStyleIds.includes(s.id));
+ await f.call(`/clinics/${clinic.id}/style-selection`,'PUT',{primaryStyleId:newStyle.id,secondaryStyleIds:[]});
+ const updated=(await f.call(`/weeks/${week.id}`)).week;
+ assert.ok(updated.items.every(item=>item.style_id===newStyle.id&&item.copy_status==='draft'&&!item.frames.length));
+ assert.ok(updated.items.every(item=>item.brief.prepared));
+ await f.call(`/weeks/${week.id}/generate`,'POST',{stage:'writing'});await f.drain();
+ assert.ok(f.textCalls.filter(input=>input.schema.properties.frames).slice(-6).every(input=>input.prompt.includes(newStyle.name)));
+ const rewritten=(await f.call(`/weeks/${week.id}`)).week;assert.ok(rewritten.items.every(item=>item.style_id===newStyle.id&&item.copy_status==='validated'));
+ }finally{f.sqlite.close();}
+});
+
+test('style changes retain per-item overrides and completed artwork, but explicit rewrites adopt the new default',async()=>{
+ const f=fixture();try{
+ const {clinic,week}=await f.setup();const styles=(await f.call(`/clinics/${clinic.id}`)).styles;
+ const customStyle=styles[1],newStyle=styles[2];
+ const {item:custom}=await f.call(`/clinics/${clinic.id}/content`,'POST',{type:'post',topic:'Dental care',styleId:customStyle.id});await f.drain();
+ await f.call(`/weeks/${week.id}/generate`,'POST',{});await f.drain();
+ const before=(await f.call(`/weeks/${week.id}`)).week.items[0];
+ await f.call(`/clinics/${clinic.id}/style-selection`,'PUT',{primaryStyleId:newStyle.id,secondaryStyleIds:[]});
+ assert.equal((await f.call(`/content/${custom.id}`)).item.style_id,customStyle.id);
+ const saved=(await f.call(`/content/${before.id}`)).item;assert.deepEqual(saved.frames,before.frames);assert.equal(saved.style_id,before.style_id);
+ await f.call(`/content/${before.id}/write`,'POST',{});await f.drain();assert.equal((await f.call(`/content/${before.id}`)).item.style_id,newStyle.id);
+ await f.call(`/content/${custom.id}/write`,'POST',{});await f.drain();assert.equal((await f.call(`/content/${custom.id}`)).item.style_id,customStyle.id);
+ }finally{f.sqlite.close();}
+});
+
+test('selected primary and supporting templates are assigned by format and running work is preserved',async()=>{
+ const f=fixture();try{
+ const {clinic,week}=await f.setup();const styles=(await f.call(`/clinics/${clinic.id}`)).styles;
+ const item=week.items[0];await f.call(`/content/${item.id}/write`,'POST',{});
+ const running=(await f.call(`/content/${item.id}`)).item;
+ await f.call(`/clinics/${clinic.id}/style-selection`,'PUT',{primaryStyleId:styles[2].id,secondaryStyleIds:[styles[0].id,styles[1].id]});
+ const current=(await f.call(`/weeks/${week.id}`)).week;
+ assert.equal(current.items[0].style_id,running.style_id);assert.equal(current.items[0].revision,running.revision);
+ for(const draft of current.items.slice(1))assert.equal(draft.style_id,draft.type==='story'?styles[1].id:styles[0].id);
+ await f.drain();
+ }finally{f.sqlite.close();}
+});
+
+test('clinic facts, voice and contacts refresh existing unfinished drafts',async()=>{
+ const f=fixture();try{
+ const {clinic,week}=await f.setup();await f.call(`/weeks/${week.id}/generate`,'POST',{stage:'writing'});await f.drain();
+ await f.call(`/clinics/${clinic.id}/profile`,'PUT',{revision:clinic.revision,name:'Updated Clinic',tone:'Calm and professional',phone:'+91 9999999999',facts:[{text:'We are open on Sundays.'}],confirmed:true});
+ const updated=(await f.call(`/weeks/${week.id}`)).week;assert.ok(updated.items.every(item=>!item.frames.length&&!item.brief.prepared&&item.copy_status==='draft'));
+ await f.call(`/weeks/${week.id}/generate`,'POST',{stage:'writing'});await f.drain();
+ for(const item of (await f.call(`/weeks/${week.id}`)).week.items){assert.equal(item.context.tone,'Calm and professional');assert.equal(item.context.brand.name,'Updated Clinic');assert.equal(item.context.business.contacts.phone,'+91 9999999999');assert.ok(item.context.business.clinicFacts.includes('We are open on Sundays.'));}
+ }finally{f.sqlite.close();}
+});
+
+test('a settings change during copy generation invalidates the old snapshot when it finishes',async()=>{
+ const f=fixture();try{
+ const {clinic,week}=await f.setup();await f.call(`/weeks/${week.id}/generate`,'POST',{stage:'writing'});await f.drain();
+ for(const item of (await f.call(`/weeks/${week.id}`)).week.items)await f.call(`/content/${item.id}/write`,'POST',{});
+ await f.call(`/clinics/${clinic.id}/profile`,'PUT',{revision:clinic.revision,tone:'Calm and professional',confirmed:true});await f.drain();
+ const items=(await f.call(`/weeks/${week.id}`)).week.items;assert.ok(items.every(item=>item.copy_status==='draft'&&!item.frames.length&&!item.brief.prepared));
+ }finally{f.sqlite.close();}
+});
+
+test('regenerating a selected template invalidates unfinished copy using its previous reference image',async()=>{
+ const f=fixture();try{
+ const {clinic,week}=await f.setup();await f.call(`/weeks/${week.id}/generate`,'POST',{stage:'writing'});await f.drain();
+ await f.call(`/clinics/${clinic.id}/styles/${clinic.styleSelection.primaryStyleId}/regenerate`,'POST',{notes:'Use larger headings'});await f.drain();
+ const items=(await f.call(`/weeks/${week.id}`)).week.items;
+ assert.equal(items[0].copy_status,'draft');assert.equal(items[0].frames.length,0);assert.ok(items[0].brief.prepared);
+ assert.ok(items.filter(item=>item.style_id!==clinic.styleSelection.primaryStyleId).every(item=>item.copy_status==='validated'));
  }finally{f.sqlite.close();}
 });
