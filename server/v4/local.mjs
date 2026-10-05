@@ -35,4 +35,5 @@ service=createV4Service({viewer:{user:{email:'Local workspace'},account:{id:'loc
 });
 export const localV4=service;
 export const localDb=DB;
+export const localProviders=providers;
 await service.recover();

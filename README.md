@@ -30,6 +30,10 @@ To move storage, set `STORAGE_ROOT=/absolute/path/to/carousel-storage` in `.env`
 
 Scheduling, publishing integrations and payment checkout are deferred. See the [V4 launch guide](docs/V4-LAUNCH.md) for implementation details and limits.
 
+## Content Engine
+
+SmileCraft's own Instagram workspace lives at **/engine/** (local: http://127.0.0.1:4178/engine/; cloud: administrator only). It comes preloaded with the 100-idea content bank, 19 lead magnets, 11 editable templates and the SmileCraft brand rules. Add your logo, create or upload styles, then plan content from the bank or write custom pieces; it uses the same Codex/agy or API providers as the studio. See [Content Engine](docs/CONTENT-ENGINE.md). Cloud deployment requires migration `0015_content_engine.sql`.
+
 ## Cloud
 
 Cloud V4 uses Google sign-in, private D1/R2 storage, queued API generation and manually allocated plans. Codex/AGY provider selection belongs to the local version. Cloud V4 does not require CLI installation or companion pairing.

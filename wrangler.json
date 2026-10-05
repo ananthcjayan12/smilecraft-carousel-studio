@@ -16,7 +16,9 @@
       "/login",
       "/legacy.html",
       "/health",
-      "/api/*"
+      "/api/*",
+      "/engine",
+      "/engine/*"
     ]
   },
   "d1_databases": [

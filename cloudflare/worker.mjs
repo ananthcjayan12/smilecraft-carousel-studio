@@ -1,5 +1,6 @@
 import { session, mutationAllowed, loginPage, authRoute } from './auth.mjs';
 import { cloudV4 } from './v4.mjs';
+import { cloudEngine } from './engine.mjs';
 import { apiRoute } from './studio.mjs';
 import { consumeJob, recoverStaleJobs } from './generation.mjs';
 import { sampleRequestRoute } from '../server/sample-request.mjs';
@@ -25,6 +26,8 @@ export default {
       const authStarted=performance.now(),viewer=await session(request,env),authDuration=performance.now()-authStarted;
       const isAdmin=Boolean(viewer&&env.ADMIN_EMAIL&&viewer.email.toLowerCase()===env.ADMIN_EMAIL.toLowerCase());
       if(path==='/legacy.html'&&!isAdmin)return json({error:'Administrator access required.'},403);
+      // The Content Engine is the administrator's own marketing workspace.
+      if((path==='/engine'||path.startsWith('/engine/'))&&!isAdmin)return viewer?json({error:'Administrator access required.'},403):Response.redirect(`${env.APP_ORIGIN}/login`,302);
       if (path.startsWith('/api/companion/')) {
         if(!isAdmin)return json({error:'Advanced studio access is restricted to the administrator.'},403);
         if (viewer && !['GET','HEAD'].includes(request.method) && !mutationAllowed(request,env,viewer)) return json({error:'This request did not pass the session check.'},403);
@@ -35,6 +38,7 @@ export default {
         if (!viewer) return json({ error: 'Sign in to continue.' }, 401);
         if (!['GET', 'HEAD'].includes(request.method) && !mutationAllowed(request, env, viewer)) return json({ error: 'This request did not pass the session check. Reload and retry.' }, 403);
         if(path.startsWith('/api/v4/')){const started=performance.now(),response=await cloudV4(env,{isAdmin,viewer}).route(request,viewer.account_id,url);response.headers.set('Server-Timing',`auth;dur=${authDuration.toFixed(1)},app;dur=${(performance.now()-started).toFixed(1)}`);return response;}
+        if(path.startsWith('/api/engine/')){if(!isAdmin)return json({error:'The Content Engine is restricted to the administrator.'},403);return cloudEngine(env,{isAdmin,viewer}).route(request,viewer.account_id,url);}
         if(!isAdmin&&!['/api/me','/api/plans'].includes(path)&&!path.startsWith('/api/admin/'))return json({error:'Advanced studio access is restricted to the administrator.'},403);
         return await apiRoute(request, env, viewer, url);
       }
@@ -44,10 +48,10 @@ export default {
       return json({ error: error.status && error.status < 500 ? error.message : 'The service could not complete that request.' }, error.status || 500);
     }
   },
-  async scheduled(_event, env) { await recoverStaleJobs(env); await expireCompanionJobs(env); await cloudV4(env).recover(); },
+  async scheduled(_event, env) { await recoverStaleJobs(env); await expireCompanionJobs(env); await cloudV4(env).recover(); await cloudEngine(env).recover(); },
   async queue(batch, env) {
     await Promise.all(batch.messages.map(async message => {
-      try { if(message.body?.v4JobId)await cloudV4(env).consume(message.body.v4JobId);else await consumeJob(env, message.body?.jobId); message.ack(); }
+      try { if(message.body?.v4JobId)await cloudV4(env).consume(message.body.v4JobId);else if(message.body?.engineJobId)await cloudEngine(env).consume(message.body.engineJobId);else await consumeJob(env, message.body?.jobId); message.ack(); }
       catch (error) { console.error('Queue processing failed', error); message.retry(); }
     }));
   }
