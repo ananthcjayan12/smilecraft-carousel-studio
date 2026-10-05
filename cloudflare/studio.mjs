@@ -1,3 +1,4 @@
+import {adjustCredits} from './admin-credits.mjs';
 import { imageFormat } from '../web/image-formats.js';
 import { publicBusinessPacks, getBusinessPack, resolveBusinessContext, starterSlidesForPack } from '../server/business-packs.mjs';
 import { repairGeneration } from '../web/studio-controls.js';
@@ -74,6 +75,7 @@ export async function apiRoute(request, env, viewer, url) {
     if (!env.ADMIN_EMAIL || viewer.email.toLowerCase() !== env.ADMIN_EMAIL.toLowerCase()) return bad('Not authorized.', 403);
     return adminLeadsRoute(request, url, env.DB);
   }
+  if(parts.length===5&&parts[0]==='api'&&parts[1]==='admin'&&parts[2]==='accounts'&&parts[4]==='credits'&&method==='POST')return adjustCredits(request,env,viewer,parts[3]);
   if (parts[0] === 'api' && parts[1] === 'admin' && parts[2] === 'accounts' && parts[3] && parts[4] === 'allocate' && method === 'POST') {
     if (!env.ADMIN_EMAIL || viewer.email.toLowerCase() !== env.ADMIN_EMAIL.toLowerCase()) return bad('Not authorized.', 403);
     const input = await body(), plan = await first(env.DB, 'SELECT * FROM plans WHERE id=? AND active=1 ORDER BY version DESC LIMIT 1', String(input.planId || ''));

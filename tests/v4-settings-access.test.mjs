@@ -10,13 +10,13 @@ let rewritten=source.replace("'../../image-options.js'",JSON.stringify(new URL('
 const settings=await import(url(rewritten)),mock=await import(api);
 const state={me:{isAdmin:false,user:{email:'client@example.com'},account:{id:'client'}},bootstrap:{capabilities:{local:false},activation:{active:true,credits:900},clinics:[]},clinic:null};
 test('client settings make no provider requests and expose no model or advanced studio controls',async()=>{
- const html=await settings.render(state,new URLSearchParams());assert.equal(mock.calls.length,0);assert.doesNotMatch(html,/data-form="providers"|legacy.html|data-form="activate"/);
+ const html=await settings.render(state,new URLSearchParams());assert.equal(mock.calls.length,0);assert.doesNotMatch(html,/data-form="providers"|legacy.html|data-form="activate"|data-form="adjust-credits"/);
  assert.doesNotMatch(shell(state,'/settings',html),/legacy.html|Admin dashboard/);
 });
 test('admin dashboard exposes global models, client balances, and allocation controls',async()=>{
  const admin={...state,me:{...state.me,isAdmin:true}};
  const html=await settings.render(admin,new URLSearchParams('admin=1'));
- assert.match(html,/AI models for all clients/);assert.match(html,/data-form="activate"/);assert.match(html,/900 credits/);assert.match(html,/legacy.html/);
+ assert.match(html,/AI models for all clients/);assert.match(html,/data-form="activate"/);assert.match(html,/900 credits/);assert.match(html,/data-form="adjust-credits"/);assert.match(html,/Add credits/);assert.match(html,/Remove credits/);assert.match(html,/Set available balance/);assert.match(html,/legacy.html/);
  assert.deepEqual(mock.calls,['/providers','/api/admin/accounts','/api/plans']);
  assert.match(shell(admin,'/admin',html),/Admin dashboard/);
 });
