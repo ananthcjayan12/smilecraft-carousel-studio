@@ -88,7 +88,7 @@ function fixture(options = {}) {
       codex: { label: "Codex CLI", available: true, models: [["imagegen", "Codex"]], writingModels: [["gpt-test", "GPT test"]] },
     }),
     enqueue: async (id) => queue.push(id),
-    designReference: async (id) => (id === "clinical-white" || id === "premium-charcoal" ? { bytes: png, mime: "image/png" } : null),
+    designReference: async (id) => (id === "flosspost-clean-white" || id === "flosspost-bold-indigo" ? { bytes: png, mime: "image/png" } : null),
     saveImage: async (account, brandId, image) => {
       const key = `${account}/${brandId}/${crypto.randomUUID()}`;
       objects.set(key, { bytes: Buffer.from(image.bytes), mime: image.mime });
@@ -117,14 +117,17 @@ function fixture(options = {}) {
   return { sqlite, service, call, drain, queue, renders };
 }
 
-test("bootstrap seeds the SmileCraft brand, 100 ideas, 19 lead magnets and the default templates", async () => {
+test("bootstrap seeds the FlossPost brand, 100 ideas, 19 lead magnets and the default templates", async () => {
   const f = fixture();
   const boot = await f.call("/bootstrap");
-  assert.equal(boot.brand.name, "SmileCraft");
+  assert.equal(boot.brand.name, "FlossPost");
   assert.equal(boot.ideaCount, BANK_IDEAS.length);
   assert.equal(BANK_IDEAS.length, 100);
   assert.equal(boot.magnets.length, BANK_MAGNETS.length);
   assert.equal(boot.templates.length, DEFAULT_TEMPLATES.length);
+  assert.deepEqual(boot.catalog.designs.map((d) => d.id), [
+    "flosspost-warm-playful", "flosspost-clean-white", "flosspost-bold-indigo",
+  ]);
   assert.ok(boot.brand.profile.rules.some((r) => /practice/.test(r)));
   // A second bootstrap is idempotent.
   const again = await f.call("/bootstrap");
@@ -142,19 +145,36 @@ test("every idea maps to a template of its own format", () => {
   }
 });
 
+test("bootstrap rebrands saved library copy without overwriting edits and is idempotent", async () => {
+  const f = fixture();
+  const { brand } = await f.call("/bootstrap");
+  f.sqlite.prepare("UPDATE engine_brands SET name=?, profile_json=? WHERE id=?").run("SmileCraft", JSON.stringify({ product: "My edited SmileCraft offer", rules: ["Keep this rule"] }), brand.id);
+  f.sqlite.prepare("UPDATE engine_ideas SET angle=? WHERE brand_id=? AND number=3").run("My custom SmileCraft angle", brand.id);
+  f.sqlite.prepare("UPDATE engine_templates SET instructions=? WHERE brand_id=?").run("Custom SmileCraft instructions", brand.id);
+  f.sqlite.prepare("UPDATE engine_magnets SET description=? WHERE brand_id=?").run("Custom SMILECRAFT resource", brand.id);
+  const boot = await f.call("/bootstrap");
+  assert.equal(boot.brand.name, "FlossPost");
+  assert.equal(boot.brand.profile.product, "My edited FlossPost offer");
+  assert.deepEqual(boot.brand.profile.rules, ["Keep this rule"]);
+  assert.equal(f.sqlite.prepare("SELECT angle FROM engine_ideas WHERE brand_id=? AND number=3").get(brand.id).angle, "My custom FlossPost angle");
+  assert.ok(boot.templates.every((t) => t.instructions === "Custom FlossPost instructions"));
+  assert.ok(boot.magnets.every((m) => m.description === "Custom FLOSSPOST resource"));
+  assert.equal((await f.call("/bootstrap")).brand.revision, boot.brand.revision);
+});
+
 test("styles: created from references, uploaded, regenerated, defaulted and protected", async () => {
   const f = fixture();
   const { brand } = await f.call("/bootstrap");
   const b = encodeURIComponent(brand.id);
   const plan = await f.call(`/brands/${b}/plans`, "POST", {});
   assert.match(plan.error, /style/);
-  const created = await f.call(`/brands/${b}/styles`, "POST", { referenceIds: ["clinical-white", "premium-charcoal", "not-real"], notes: "bold" });
+  const created = await f.call(`/brands/${b}/styles`, "POST", { referenceIds: ["flosspost-clean-white", "flosspost-bold-indigo", "not-real"], notes: "bold" });
   assert.equal(created.styles.length, 2);
   await f.drain();
   const boot = await f.call("/bootstrap");
   assert.ok(boot.styles.every((s) => s.status === "ready" && s.asset_id));
   assert.ok(boot.styles.some((s) => s.id === boot.brand.brand.defaultStyleId));
-  assert.match(f.renders[0].prompt, /SmileCraft/);
+  assert.match(f.renders[0].prompt, /FlossPost/);
   assert.match(f.renders[0].prompt, /Requested changes.*bold/s);
   // Upload your own template image as a style.
   const upload = await f.call(`/brands/${b}/styles/upload`, "POST", new Uint8Array(png), { "content-type": "image/png", "X-Style-Name": "Mine" });
@@ -179,7 +199,7 @@ test("a plan picks unused ideas by format, writes, validates, auto-approves and 
   const f = fixture();
   const { brand } = await f.call("/bootstrap");
   const b = encodeURIComponent(brand.id);
-  await f.call(`/brands/${b}/styles`, "POST", { referenceIds: ["clinical-white"] });
+  await f.call(`/brands/${b}/styles`, "POST", { referenceIds: ["flosspost-clean-white"] });
   await f.drain();
   const { plan } = await f.call(`/brands/${b}/plans`, "POST", { date: "2026-10-06", counts: { carousel: 1, reel: 2, post: 1, story: 2 }, run: true });
   assert.equal(plan.items.length, 6);
@@ -220,7 +240,7 @@ test("custom content waits for copy approval; rejected copy is rewritten with th
   const f = fixture({ invalidFirst: true });
   const { brand, templates } = await f.call("/bootstrap");
   const b = encodeURIComponent(brand.id);
-  await f.call(`/brands/${b}/styles`, "POST", { referenceIds: ["clinical-white"] });
+  await f.call(`/brands/${b}/styles`, "POST", { referenceIds: ["flosspost-clean-white"] });
   await f.drain();
   const growth = templates.find((t) => t.slug === "growth-carousel");
   const { item } = await f.call(`/brands/${b}/content`, "POST", { topic: "Why recall texts work", templateId: growth.id, keyword: "reactivate", instructions: "Mention 18 months." });
@@ -294,7 +314,7 @@ test("templates, ideas and lead magnets are editable and validated", async () =>
   const duplicate = await f.call(`/brands/${b}/magnets`, "POST", { keyword: "TOUR", name: "Again" });
   assert.match(duplicate.error, /already/);
   // Brand edits are revision-checked and keep rules as a list.
-  const saved = await f.call(`/brands/${b}`, "PUT", { revision: brand.revision, name: "SmileCraft", primary: "#112233", rules: ["One", "", "Two"] });
+  const saved = await f.call(`/brands/${b}`, "PUT", { revision: brand.revision, name: "FlossPost", primary: "#112233", rules: ["One", "", "Two"] });
   assert.deepEqual(saved.brand.profile.rules, ["One", "Two"]);
   const stale = await f.call(`/brands/${b}`, "PUT", { revision: brand.revision, name: "Old" });
   assert.match(stale.error, /changed/);

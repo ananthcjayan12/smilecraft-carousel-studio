@@ -1,5 +1,5 @@
 // Content Engine defaults: formats, the daily posting playbook, preloaded templates and the
-// SmileCraft brand profile. New brands are seeded from these; everything is editable in the app.
+// FlossPost brand profile. New brands are seeded from these; everything is editable in the app.
 export { BANK_PILLARS, BANK_IDEAS, BANK_MAGNETS } from "./bank-data.mjs";
 
 export const FORMATS = {
@@ -22,7 +22,7 @@ export const DAILY_SLOTS = [
   { time: "07:00", format: "story", label: "Story · question box" },
 ];
 
-export const FORMULA = "Hook → Value → SmileCraft → Comment KEYWORD";
+export const FORMULA = "Hook → Value → FlossPost → Comment KEYWORD";
 
 export const DEFAULT_TEMPLATES = [
   {
@@ -36,11 +36,11 @@ export const DEFAULT_TEMPLATES = [
       "The insight",
       "How to fix it",
       "How to fix it",
-      "Where SmileCraft fits",
+      "Where FlossPost fits",
       "Comment the keyword",
     ],
     instructions:
-      "A practice-growth tip for practice owners and office managers. Slide 1 is a scroll-stopping hook of at most 9 words. Each middle slide teaches one concrete, specific step a practice can do this week. The SmileCraft slide says in one or two plain lines how SmileCraft removes the work, with no hype. The final slide says “Comment KEYWORD” and names the free resource.",
+      "A practice-growth tip for practice owners and office managers. Slide 1 is a scroll-stopping hook of at most 9 words. Each middle slide teaches one concrete, specific step a practice can do this week. The FlossPost slide says in one or two plain lines how FlossPost removes the work, with no hype. The final slide says “Comment KEYWORD” and names the free resource.",
     visual:
       "Editorial slides with big confident type, generous white space and one simple supporting visual per slide (icons, simple diagrams, phone screens). No stock-photo smiles.",
   },
@@ -135,7 +135,7 @@ export const DEFAULT_TEMPLATES = [
     ratio: "9:16",
     roles: ["Cover hook", "What happens", "The result"],
     instructions:
-      "Shows SmileCraft working, filmed as a screen recording of the real product. The script’s shots describe exactly what to record on screen, with timestamps where they help. Never claim features beyond the brand’s product description. Closing line: “Comment KEYWORD”.",
+      "Shows FlossPost working, filmed as a screen recording of the real product. The script’s shots describe exactly what to record on screen, with timestamps where they help. Never claim features beyond the brand’s product description. Closing line: “Comment KEYWORD”.",
     visual: "Vertical cover and result cards that frame a phone or laptop screen area; clean product-marketing look.",
   },
   {
@@ -164,10 +164,10 @@ export function defaultTemplateSlug(idea) {
 }
 
 export const DEFAULT_BRAND = {
-  name: "SmileCraft",
+  name: "FlossPost",
   profile: {
     product:
-      "SmileCraft designs and writes branded Instagram carousels, posts and stories for dental practices. A practice sends its logo once, gets a ready draft every morning and approves, changes or skips it from their phone.",
+      "FlossPost designs and writes branded Instagram carousels, posts and stories for dental practices. A practice sends its logo once, gets a ready draft every morning and approves, changes or skips it from their phone.",
     audience:
       "Dental practice owners and office managers in the US, UK and Australia. Dental students and hygienists follow fastest; owners and office managers buy.",
     voice: "Warm, direct and a little playful. Practical over hype. Sounds like a peer who knows how a dental office really runs.",
@@ -183,7 +183,7 @@ export const DEFAULT_BRAND = {
       "In the UK only GDC-registered specialists can be called “specialist”. Never promote Botox to the public in the UK or Australia.",
       "Australia: no testimonials about clinical care and no before/after outcome claims in advertising.",
       "Replies to reviews must never confirm that someone is a patient.",
-      "Every feed post follows Hook → Value → SmileCraft → Comment KEYWORD.",
+      "Every feed post follows Hook → Value → FlossPost → Comment KEYWORD.",
     ],
   },
   brand: { primary: "#0e7a5b", accent: "#c9472f", handle: "", website: "", bookingUrl: "" },

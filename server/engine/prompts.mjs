@@ -206,7 +206,7 @@ export function stylePrompt(brand, reference, { notes = "", revising = false, up
     `${brand.name}: ${brand.profile?.product || "a brand on Instagram"} Audience: ${brand.profile?.audience || ""}`,
     uploaded
       ? "The first supplied image is the brand's own template: keep its look and improve consistency across the five panels."
-      : `The first supplied board (${reference?.name || "reference"}, ${reference?.kind || ""}) is a dental-practice design system used only for hierarchy, rhythm, type contrast and polish. Do not copy its sample text, language, people, logo or clinic identity.`,
+      : `The first supplied board (${reference?.name || "reference"}, ${reference?.kind || ""}) is the selected brand design system. Follow its hierarchy, rounded typography, colour rhythm, illustration style, speech bubbles, checklists and accent motifs. Read the design-system guide below the sample panels. Adapt its sample wording, logo and handle to the supplied brand identity; use its final-slide keyword CTA treatment only on the final panel.`,
     `BRAND COLOURS: primary ${brand.brand?.primary}, accent ${brand.brand?.accent}. Voice: ${brand.profile?.voice || ""}`,
     "Panels: 1) bold hook, 2) tip or list, 3) product or proof, 4) steps or process, 5) a big “Comment KEYWORD” call to action. Use short neutral placeholder labels such as “Headline”, “Key point” and “Comment KEYWORD”; no invented claims, prices or numbers. English only.",
     brand.profile?.mascot ? `A small illustrated mascot (${brand.profile.mascot}) may appear on one or two panels.` : "",

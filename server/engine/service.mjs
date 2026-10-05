@@ -1,7 +1,9 @@
 // Content Engine service: brand, styles, templates, content bank, plans and the
 // write → validate → approve → artwork pipeline. Platform-agnostic: the local Node server
 // (Codex/agy CLIs or API keys) and the Cloudflare Worker (API keys) supply `platform`.
-import { DESIGN_SYSTEMS } from "../../web/design-systems.js";
+import { DESIGN_SYSTEMS as LEGACY_DESIGN_SYSTEMS } from "../../web/design-systems.js";
+import { ENGINE_DESIGN_SYSTEMS as DESIGN_SYSTEMS } from "../../web/engine/design-systems.js";
+import { rebrandStatements } from "./rebrand.mjs";
 import {
   BANK_IDEAS,
   BANK_MAGNETS,
@@ -266,6 +268,7 @@ export function createEngineService(platform) {
     return statements;
   }
   async function ensureBrand(account) {
+    await batch(rebrandStatements(account));
     const existing = await all("SELECT * FROM engine_brands WHERE account_id=? ORDER BY created_at", account);
     if (existing.length) return existing.map(viewBrand);
     const brandId = `${account}:brand`,
@@ -700,7 +703,7 @@ export function createEngineService(platform) {
           account,
           kind: "style",
           generation: input.generation,
-          prompt: stylePrompt(b, DESIGN_SYSTEMS.find((d) => d.id === style.reference_id), {
+          prompt: stylePrompt(b, [...DESIGN_SYSTEMS, ...LEGACY_DESIGN_SYSTEMS].find((d) => d.id === style.reference_id), {
             notes: input.notes || style.notes || "",
             revising: Boolean(current),
             uploaded,

@@ -14,7 +14,7 @@ function ideaForm(state, idea = {}) {
     "format",
     Object.entries(c.formats).map(([k, v]) => [k, v.label]),
     idea.format || "carousel",
-  )}${select("Countries", "region", Object.entries(c.regions), idea.region || "all")}</div>${field("Hook", "hook", idea.hook || "", "text", "The first line people read.")}${area("What to show", "show", idea.show || "")}${area("SmileCraft angle", "angle", idea.angle || "")}<div class="two-col">${select(
+  )}${select("Countries", "region", Object.entries(c.regions), idea.region || "all")}</div>${field("Hook", "hook", idea.hook || "", "text", "The first line people read.")}${area("What to show", "show", idea.show || "")}${area("FlossPost angle", "angle", idea.angle || "")}<div class="two-col">${select(
     "Comment keyword",
     "keyword",
     [["", "No keyword"], ...state.magnets.map((m) => [m.keyword, `${m.keyword} · ${m.name}`])],

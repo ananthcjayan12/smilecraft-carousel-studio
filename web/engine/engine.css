@@ -42,8 +42,8 @@
 .style-buttons{display:flex;flex-wrap:wrap;gap:6px;margin-top:10px}
 .style-new{align-items:start;margin-bottom:20px}
 .design-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;margin:10px 0}
-.design-pick{display:grid;grid-template-columns:auto 64px 1fr;gap:8px;align-items:center;border:1px solid var(--line);border-radius:10px;padding:6px;cursor:pointer;font-size:12px}
-.design-pick img{width:64px;height:40px;object-fit:cover;border-radius:6px}
+.design-pick{display:grid;grid-template-columns:auto 1fr;gap:8px;align-items:center;border:1px solid var(--line);border-radius:10px;padding:10px;cursor:pointer;font-size:12px}
+.design-pick img{grid-column:1 / -1;grid-row:1;width:100%;height:auto;aspect-ratio:4 / 3;object-fit:contain;border-radius:6px}
 .design-pick small{display:block;color:var(--muted);font-size:10.5px}
 .design-pick:has(input:checked){border-color:var(--accent);background:var(--lavender)}
 .brand-form{margin-bottom:24px}
