@@ -421,3 +421,21 @@ test('clinic removal cancels generation, removes its data and preserves other cl
  assert.deepEqual((await f.call('/bootstrap')).clinics.map(c=>c.id),[other.id]);
  }finally{f.sqlite.close();}
 });
+
+test('Malayalam artwork is visually checked against approved copy before attachment and can be retried',async()=>{
+ const f=fixture();try{
+ const {week}=await f.setup({language:'Malayalam + English'});
+ await f.call(`/weeks/${week.id}/generate`,'POST',{stage:'writing'});await f.drain();
+ const item=(await f.call(`/weeks/${week.id}`)).week.items[0];
+ f.rejectValidation(true);
+ await f.call(`/content/${item.id}/generate`,'POST',{});await f.drain();
+ const rejected=await f.call(`/content/${item.id}`);
+ assert.ok(rejected.item.frames.every(frame=>!frame.assetId));
+ assert.ok(rejected.jobs.filter(job=>job.kind==='frame').every(job=>job.status==='failed'&&/Artwork text check failed/.test(job.error)));
+ const reviews=f.textCalls.filter(call=>call.prompt.includes('FINAL GENERATED ARTWORK'));
+ assert.equal(reviews.length,5);assert.ok(reviews.every(call=>call.reference?.bytes&&call.reference.mime==='image/png'));
+ assert.ok(reviews[0].prompt.includes(item.frames[0].heading));
+ f.rejectValidation(false);await f.call(`/content/${item.id}/generate`,'POST',{});await f.drain();
+ assert.ok((await f.call(`/content/${item.id}`)).item.frames.every(frame=>frame.assetId));
+ }finally{f.sqlite.close();}
+});

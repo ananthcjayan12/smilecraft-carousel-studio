@@ -4,7 +4,7 @@ import {clinicPlan} from '../../web/v4/plan.js';
 import {normalizeImageOptions} from '../../web/image-options.js';
 import {STYLE_REFERENCES} from './image-prompts.mjs';
 import { KNOWLEDGE_CARDS, cardById, rankCards } from './knowledge.mjs';
-import {TASKS,sourceBrief,contentContext,briefPrompt,writingPrompt,validationPrompt,briefSchema,writingSchema,validationSchema,checkDraft} from './content-prompts.mjs';
+import {TASKS,sourceBrief,contentContext,briefPrompt,writingPrompt,validationPrompt,briefSchema,writingSchema,validationSchema,checkDraft,needsArtworkTextReview,artworkTextReviewPrompt} from './content-prompts.mjs';
 import { publicUrl, publicFetch, extractCandidates } from './extract.mjs';
 import { DESIGN_SYSTEMS } from '../../web/design-systems.js';
 const now=()=>new Date().toISOString(), id=()=>crypto.randomUUID();
@@ -64,7 +64,7 @@ export function createV4Service(platform){
   const existing=await first('SELECT * FROM v4_jobs WHERE account_id=? AND request_key=?',account,key);if(existing&&!['cancelled','failed'].includes(existing.status))return existing;if(existing)key=key+':'+id();
   const task=kind==='frame'?'artwork':kind==='brief'?'writing':kind;
   const generation=Object.hasOwn(TASKS,task)?await taskChoice(account,task):undefined;
-  const validationGeneration=kind==='writing'?await taskChoice(account,'validation'):undefined;
+  const validationGeneration=['writing','frame'].includes(kind)?await taskChoice(account,'validation'):undefined;
   const jobId=id();const inserted=await run('INSERT OR IGNORE INTO v4_jobs(id,account_id,clinic_id,week_id,content_id,kind,priority,input_json,created_at,request_key) SELECT ?,?,?,?,?,?,?,?,?,? WHERE ? IS NULL OR EXISTS(SELECT 1 FROM v4_weeks WHERE id=? AND status!=\'cancelled\')',jobId,account,clinicId,weekId,contentId,kind,priority,JSON.stringify({...input,...(generation?{generation}:{}),...(validationGeneration?{validationGeneration}:{})}),now(),key,weekId,weekId);
   if(!inserted.meta.changes)return null;
   try{await platform.enqueue(jobId);}catch{await run("UPDATE v4_jobs SET status='failed',error=? WHERE id=?",'Could not queue work. Retry this task.',jobId);}
@@ -264,6 +264,13 @@ export function createV4Service(platform){
     const frame=item.frames.find(f=>f.position===input.position);if(!frame)throw fail('Frame not found.');
     if(!frame.assetId){
      const image=await platform.generateFrame(c,item,frame,await first('SELECT * FROM v4_styles WHERE id=? AND clinic_id=? AND account_id=?',item.style_id,c.id,account),row.id,input.generation,controller.signal);
+     if(needsArtworkTextReview(item,frame)&&!image.demoPrefix){
+      try{
+       await ensureRunning();
+       const report=await platform.generateText({account,generation:input.validationGeneration||await taskChoice(account,'validation'),prompt:artworkTextReviewPrompt(item,frame),schema:validationSchema,reference:{bytes:image.bytes,mime:image.mime},signal:controller.signal});
+       if(report.valid!==true||!Array.isArray(report.issues)||report.issues.length)throw fail(`Artwork text check failed. Regenerate this frame: ${(Array.isArray(report.issues)&&report.issues.length?report.issues:['The text could not be verified.']).map(issue=>text(issue,600)).join(' ')}`,502);
+      }catch(error){await platform.refundImage?.(account,image);throw error;}
+     }
      await ensureRunning(image);const assetId=await saveAsset(account,c.id,image);await ensureRunning(image);
      // Retry compare-and-swap so concurrent frame completions cannot overwrite each other.
      let attached=false;for(let attempt=0;attempt<8;attempt++){
