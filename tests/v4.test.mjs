@@ -269,7 +269,8 @@ test('changing clinic language resets unfinished weekly copy and prepares in the
 test('completed artwork stays available after a language change and explicit rewrite uses the new language',async()=>{
  const f=fixture();try{
  const {clinic,week}=await f.setup();await f.call(`/weeks/${week.id}/generate`,'POST',{});await f.drain();
- const before=(await f.call(`/weeks/${week.id}`)).week.items[0];
+ const candidate=(await f.call(`/weeks/${week.id}`)).week.items[0];await f.call(`/content/${candidate.id}/approve`,'POST',{});
+ const before=(await f.call(`/content/${candidate.id}`)).item;
  await f.call(`/clinics/${clinic.id}/profile`,'PUT',{revision:clinic.revision,language:'Malayalam + English',confirmed:true});
  const saved=(await f.call(`/content/${before.id}`)).item;assert.deepEqual(saved.frames,before.frames);assert.equal(saved.language,'English');
  await f.call(`/content/${before.id}/write`,'POST',{});await f.drain();
@@ -299,7 +300,8 @@ test('style changes retain per-item overrides and completed artwork, but explici
  const customStyle=styles[1],newStyle=styles[2];
  const {item:custom}=await f.call(`/clinics/${clinic.id}/content`,'POST',{type:'post',topic:'Dental care',styleId:customStyle.id});await f.drain();
  await f.call(`/weeks/${week.id}/generate`,'POST',{});await f.drain();
- const before=(await f.call(`/weeks/${week.id}`)).week.items[0];
+ const candidate=(await f.call(`/weeks/${week.id}`)).week.items[0];await f.call(`/content/${candidate.id}/approve`,'POST',{});
+ const before=(await f.call(`/content/${candidate.id}`)).item;
  await f.call(`/clinics/${clinic.id}/style-selection`,'PUT',{primaryStyleId:newStyle.id,secondaryStyleIds:[]});
  assert.equal((await f.call(`/content/${custom.id}`)).item.style_id,customStyle.id);
  const saved=(await f.call(`/content/${before.id}`)).item;assert.deepEqual(saved.frames,before.frames);assert.equal(saved.style_id,before.style_id);
@@ -347,5 +349,17 @@ test('regenerating a selected template invalidates unfinished copy using its pre
  const items=(await f.call(`/weeks/${week.id}`)).week.items;
  assert.equal(items[0].copy_status,'draft');assert.equal(items[0].frames.length,0);assert.ok(items[0].brief.prepared);
  assert.ok(items.filter(item=>item.style_id!==clinic.styleSelection.primaryStyleId).every(item=>item.copy_status==='validated'));
+ }finally{f.sqlite.close();}
+});
+
+test('settings changes refresh artwork drafts while keeping approved publications',async()=>{
+ const f=fixture();try{
+ const {clinic,week}=await f.setup();await f.call(`/weeks/${week.id}/generate`,'POST',{});await f.drain();
+ const items=(await f.call(`/weeks/${week.id}`)).week.items;
+ await f.call(`/content/${items[0].id}/approve`,'POST',{});
+ await f.call(`/clinics/${clinic.id}/profile`,'PUT',{revision:clinic.revision,tone:'Calm and professional',confirmed:true});
+ const updated=(await f.call(`/weeks/${week.id}`)).week.items;
+ assert.equal(updated[0].status,'approved');assert.ok(updated[0].frames.every(frame=>frame.assetId));
+ assert.ok(updated.slice(1).every(item=>item.status==='planned'&&item.frames.length===0&&item.copy_status==='draft'));
  }finally{f.sqlite.close();}
 });

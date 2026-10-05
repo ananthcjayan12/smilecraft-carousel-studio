@@ -143,7 +143,7 @@ export function createV4Service(platform){
  function currentStyle(c,item){return item.brief?.styleMode==='custom'?item.style_id:chooseStyle(c,item.type,item.position);}
  async function syncDraftStyles(account,c,{changedStyleId}={}){
   if(!c.styleSelection.primaryStyleId)return;
-  const drafts=await all("SELECT * FROM v4_content WHERE account_id=? AND clinic_id=? AND status IN ('planned','copy_review','cancelled','failed') AND NOT EXISTS(SELECT 1 FROM json_each(frames_json) WHERE COALESCE(json_extract(value,'$.assetId'),'')!='') AND NOT EXISTS(SELECT 1 FROM v4_usage WHERE content_id=v4_content.id AND account_id=? AND status='published')",account,c.id,account);
+  const drafts=await all("SELECT * FROM v4_content WHERE account_id=? AND clinic_id=? AND status IN ('planned','copy_review','ready','cancelled','failed') AND NOT EXISTS(SELECT 1 FROM v4_usage WHERE content_id=v4_content.id AND account_id=? AND status='published')",account,c.id,account);
   for(const row of drafts){
    const item=viewContent(row),styleId=currentStyle(c,item);if(styleId===item.style_id&&item.style_id!==changedStyleId)continue;
    await styleFor(account,c,{style_id:styleId});
@@ -152,8 +152,8 @@ export function createV4Service(platform){
  }
  async function syncDraftProfile(account,c,{changed=false}={}){
   const language=c.profile.language||'English';
-  // Keep completed artwork and in-flight jobs intact. Unfinished copy must be prepared again.
-  await run("UPDATE v4_content SET language=?,topic=COALESCE(json_extract(brief_json,'$.sourceTopic'),topic),brief_json=json_set(brief_json,'$.language',?,'$.summary',''),caption='',frames_json='[]',copy_status='draft',validation_json='{}',context_json='{}',copy_approved_at=NULL,status='planned',revision=revision+1 WHERE account_id=? AND clinic_id=? AND (language!=? OR ?=1) AND status IN ('planned','copy_review','cancelled','failed') AND NOT EXISTS(SELECT 1 FROM json_each(frames_json) WHERE COALESCE(json_extract(value,'$.assetId'),'')!='') AND NOT EXISTS(SELECT 1 FROM v4_usage WHERE content_id=v4_content.id AND account_id=? AND status='published')",language,language,account,c.id,language,changed?1:0,account);
+  // Approved publications stay intact. Drafts must be prepared again with current settings.
+  await run("UPDATE v4_content SET language=?,topic=COALESCE(json_extract(brief_json,'$.sourceTopic'),topic),brief_json=json_set(brief_json,'$.language',?,'$.summary',''),caption='',frames_json='[]',copy_status='draft',validation_json='{}',context_json='{}',copy_approved_at=NULL,status='planned',revision=revision+1 WHERE account_id=? AND clinic_id=? AND (language!=? OR ?=1) AND status IN ('planned','copy_review','ready','cancelled','failed') AND NOT EXISTS(SELECT 1 FROM v4_usage WHERE content_id=v4_content.id AND account_id=? AND status='published')",language,language,account,c.id,language,changed?1:0,account);
  }
  async function writeItem(account,item,{autoArtwork=false}={}){
   if(['briefing','writing','validating','generating'].includes(item.status))throw fail('Wait for the current task to finish or cancel it.');
@@ -278,6 +278,11 @@ export function createV4Service(platform){
     if(item.frames.every(f=>f.assetId)){
      await run("UPDATE v4_usage SET status='generated' WHERE content_id=? AND account_id=? AND status='planned'",item.id,account);
      await updateWeek(account,item.week_id);
+    }
+    const fresh=await content(account,item.id),latest=await clinic(account,c.id);
+    if(fresh.status==='ready'){
+     const changed=JSON.stringify(fresh.context)!==JSON.stringify(contentContext(latest,fresh));
+     await syncDraftProfile(account,latest,{changed});await syncDraftStyles(account,latest);await updateWeek(account,fresh.week_id);
     }
     result={contentId:item.id,position:input.position};
    }
